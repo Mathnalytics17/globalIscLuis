@@ -1,0 +1,57 @@
+[
+    {
+      "model": "misc.empresa",
+      "pk": 1,
+      "fields": {
+        "nombre": "Minera Los Andes",
+        "direccion": "Av. Minera 123, Santiago, Chile",
+        "telefono": "+56228887654",
+        "email": "contacto@mineralosandes.cl",
+        "fecha_creacion": "2023-01-15T09:00:00Z"
+      }
+    },
+    {
+      "model": "misc.empresa",
+      "pk": 2,
+      "fields": {
+        "nombre": "Transportes del Pacífico",
+        "direccion": "Calle Transporte 456, Valparaíso, Chile",
+        "telefono": "+56322558899",
+        "email": "info@transportespacifico.cl",
+        "fecha_creacion": "2023-02-20T10:30:00Z"
+      }
+    },
+    {
+      "model": "misc.empresa",
+      "pk": 3,
+      "fields": {
+        "nombre": "Energía Renovable S.A.",
+        "direccion": "Av. Energía 789, Antofagasta, Chile",
+        "telefono": "+56552233445",
+        "email": "contacto@energiarenovable.cl",
+        "fecha_creacion": "2023-03-10T08:15:00Z"
+      }
+    },
+    {
+      "model": "misc.empresa",
+      "pk": 4,
+      "fields": {
+        "nombre": "Agroindustria del Sur",
+        "direccion": "Ruta 5 Sur Km 890, Temuco, Chile",
+        "telefono": "+56452233456",
+        "email": "ventas@agroindustriasur.cl",
+        "fecha_creacion": "2023-04-05T14:20:00Z"
+      }
+    },
+    {
+      "model": "misc.empresa",
+      "pk": 5,
+      "fields": {
+        "nombre": "Pesquera Austral",
+        "direccion": "Calle Costera 321, Puerto Montt, Chile",
+        "telefono": "+56652277889",
+        "email": "administracion@pesqueraaustral.cl",
+        "fecha_creacion": "2023-05-12T11:45:00Z"
+      }
+    }
+  ]

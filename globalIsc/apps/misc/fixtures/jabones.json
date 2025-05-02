@@ -1,0 +1,46 @@
+[
+  {
+    "model": "misc.jabon",
+    "fields": {
+      "tipo": "Calcio",
+      "acidez_alcali": "Ácido Libre",
+      "metodo": "ASTM D664",
+      "valor": "0,4 g AcOléico/100g",
+      "agua": "0.5 - 1",
+      "goteo": 80
+    }
+  },
+  {
+    "model": "misc.jabon",
+    "fields": {
+      "tipo": "Sodio",
+      "acidez_alcali": "Álcali Libre",
+      "metodo": "ASTM D4739",
+      "valor": "0,3 g LiOH/100g",
+      "agua": null,
+      "goteo": 180
+    }
+  },
+  {
+    "model": "misc.jabon",
+    "fields": {
+      "tipo": "Litio",
+      "acidez_alcali": "Álcali Libre",
+      "metodo": "ASTM D4739",
+      "valor": "0,3 g LiOH/100g",
+      "agua": null,
+      "goteo": 175
+    }
+  },
+  {
+    "model": "misc.jabon",
+    "fields": {
+      "tipo": "Complejo de Litio",
+      "acidez_alcali": "Álcali Libre",
+      "metodo": "ASTM D4739",
+      "valor": "0,3 g LiOH/100g",
+      "agua": null,
+      "goteo": 220
+    }
+  }
+]

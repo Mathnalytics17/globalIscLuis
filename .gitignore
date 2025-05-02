@@ -1,0 +1,108 @@
+# Archivo .gitignore para Django
+
+# Entornos virtuales
+venv/
+.env/
+.venv/
+env/
+ENV/
+
+# Archivos de entorno
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.sample
+
+# Archivos de la base de datos
+*.sqlite3
+*.db
+*.sql
+/mysql_data/
+
+# Archivos de migraciones
+*/migrations/*.py
+!*/migrations/__init__.py
+
+# Archivos de caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Archivos de instalación de Python/Pip
+*.egg
+*.egg-info
+dist/
+build/
+pip-wheel-metadata/
+*.manifest
+*.spec
+
+# Archivos de PyCharm y otros IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# Archivos de DS_Store (macOS)
+.DS_Store
+
+# Archivos de logs
+*.log
+logs/
+
+# Archivos estáticos y medios (pueden generarse)
+/staticfiles/
+/mediafiles/
+/static/
+/media/
+
+# Archivos de coverage
+.coverage
+htmlcov/
+.coverage.*
+
+# Archivos de caché
+.cache
+
+# Archivos de pytest
+.pytest_cache/
+
+# Archivos de celery
+celerybeat-schedule
+celerybeat.pid
+
+# Archivos de documentación
+docs/_build/
+
+# Archivos de PyInstaller
+*.exe
+
+# Archivos de Jupyter Notebook
+.ipynb_checkpoints
+
+# Archivos de mensajería
+*.mo
+
+# Archivos de mensajes de Django
+*.pot
+
+# Archivos de seguridad
+secret_key.txt
+*.key
+*.pem
+*.cert
+*.cer
+
+# Archivos de Docker
+docker-compose.override.yml
+docker-data/
+
+# Archivos de Node (si usas frontend moderno)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

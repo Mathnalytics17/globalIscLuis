@@ -1,0 +1,7 @@
+[
+  {"model": "misc.colorgrasa", "fields": {"nombre": "ÁMBAR"}},
+  {"model": "misc.colorgrasa", "fields": {"nombre": "ROJO"}},
+  {"model": "misc.colorgrasa", "fields": {"nombre": "AZUL"}},
+  {"model": "misc.colorgrasa", "fields": {"nombre": "VERDE"}},
+  {"model": "misc.colorgrasa", "fields": {"nombre": "UVA"}}
+]

@@ -7,7 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from ..serializers.index import CarpetaSerializer, AnalisisLubricanteSerializer, ResultadoMuestrasAceiteSerializer,MaquinaSerializer
-
+from rest_framework.permissions import AllowAny
 from rest_framework import viewsets
 from django_filters.rest_framework import DjangoFilterBackend
 
@@ -28,7 +28,7 @@ class FolderViewSet(viewsets.ModelViewSet):
     serializer_class = CarpetaSerializer
     filter_backends = [DjangoFilterBackend]  # Habilitar filtros
     filterset_fields = ['compania_id', 'typeFolder']  # Campos por los que se puede filtrar
-
+    permission_classes = [AllowAny]  # Acceso público sin autenticación
     def get_queryset(self):
         # Obtener los parámetros de la URL
         compañia_id = self.request.query_params.get('compania_id')
@@ -113,7 +113,7 @@ class MaquinaViewSet(viewsets.ModelViewSet):
     """
     queryset = Maquina.objects.all()
     serializer_class = MaquinaSerializer
-
+    permission_classes = [AllowAny]  # Acceso público sin autenticación
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]  # Filtros
     filterset_fields = ['nombre', 'tipoAceite', 'numero_serie']  # Campos para filtrar
     search_fields = ['nombre', 'codigo_equipo']  # Campos para búsqueda

@@ -1,0 +1,7 @@
+[
+  {"model": "misc.color", "fields": {"nombre": "AMBAR"}},
+  {"model": "misc.color", "fields": {"nombre": "ROJO"}},
+  {"model": "misc.color", "fields": {"nombre": "VERDE"}},
+  {"model": "misc.color", "fields": {"nombre": "AZUL"}},
+  {"model": "misc.color", "fields": {"nombre": "UVA"}}
+]

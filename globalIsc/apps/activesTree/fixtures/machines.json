@@ -1,0 +1,67 @@
+[
+    {
+      "model": "activesTree.maquina",
+      "pk": 1,
+      "fields": {
+        "nombre": "Motor Principal",
+        "componente": "Sistema de combustión",
+        "tipoAceite": "SAE 15W-40",
+        "frecuenciaCambio": "250 horas",
+        "frecuenciaAnalisis": "125 horas",
+        "numero_serie": "MP-2023-001",
+        "codigo_equipo": "EQ-MOT-001"
+      }
+    },
+    {
+      "model": "activesTree.maquina",
+      "pk": 2,
+      "fields": {
+        "nombre": "Compresor de Aire",
+        "componente": "Sistema de lubricación",
+        "tipoAceite": "ISO 100",
+        "frecuenciaCambio": "500 horas",
+        "frecuenciaAnalisis": "250 horas",
+        "numero_serie": "CA-2023-002",
+        "codigo_equipo": "EQ-COMP-002"
+      }
+    },
+    {
+      "model": "activesTree.maquina",
+      "pk": 3,
+      "fields": {
+        "nombre": "Bomba Hidráulica",
+        "componente": "Sistema de transmisión",
+        "tipoAceite": "ISO 46",
+        "frecuenciaCambio": "1000 horas",
+        "frecuenciaAnalisis": "500 horas",
+        "numero_serie": "BH-2023-003",
+        "codigo_equipo": "EQ-BOMB-003"
+      }
+    },
+    {
+      "model": "activesTree.maquina",
+      "pk": 4,
+      "fields": {
+        "nombre": "Reductor de Velocidad",
+        "componente": "Sistema mecánico",
+        "tipoAceite": "SAE 90",
+        "frecuenciaCambio": "2000 horas",
+        "frecuenciaAnalisis": "1000 horas",
+        "numero_serie": "RV-2023-004",
+        "codigo_equipo": "EQ-RED-004"
+      }
+    },
+    {
+      "model": "activesTree.maquina",
+      "pk": 5,
+      "fields": {
+        "nombre": "Turbina de Vapor",
+        "componente": "Sistema de potencia",
+        "tipoAceite": "ISO 32",
+        "frecuenciaCambio": "3000 horas",
+        "frecuenciaAnalisis": "1500 horas",
+        "numero_serie": "TV-2023-005",
+        "codigo_equipo": "EQ-TURB-005"
+      }
+    }
+  ]

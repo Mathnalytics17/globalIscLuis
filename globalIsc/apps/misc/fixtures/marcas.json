@@ -1,0 +1,177 @@
+[
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "TURBINE R&O",
+      "carpeta": "TURBINE R&O"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "MOTO SPORT",
+      "carpeta": "MOTO SPORT"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "OUTBOARD 50-1 TCW3",
+      "carpeta": "OUTBOARD"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "MAXSPEED",
+      "carpeta": "MAXSPEED"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "MAXLUBE",
+      "carpeta": "MAXLUBE"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "MAXGEAR",
+      "carpeta": "MAXGEAR"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "MAXFLUID",
+      "carpeta": "MAXFLUID"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "MAXDIESEL",
+      "carpeta": "MAXDIESEL"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "MAXDIESEL STANDARD",
+      "carpeta": "MAXDIESEL"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "MAXDIESEL PREMIUM",
+      "carpeta": "MAXDIESEL"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "MAXDIESEL ULTRA",
+      "carpeta": "MAXDIESEL"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "MAXDIESEL PLATINUM",
+      "carpeta": "MAXDIESEL"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "GLOBAL WAY",
+      "carpeta": "GLOBAL WAY"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "GLOBAL TERMICO",
+      "carpeta": "GLOBAL TERMICO"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "GLOBAL TDH",
+      "carpeta": "GLOBAL TDH"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "GLOBAL SUPER 4T",
+      "carpeta": "GLOBAL SUPER 4T"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "GLOBAL SUPER",
+      "carpeta": "GLOBAL SUPER"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "GLOBAL COMPRESSOR SB",
+      "carpeta": "GLOBAL COMPRESSOR"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "GLOBAL COMPRESSOR FS",
+      "carpeta": "GLOBAL COMPRESSOR"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "GLOBAL COMPRESSOR",
+      "carpeta": "GLOBAL COMPRESSOR"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "GLOBAL GAS LA",
+      "carpeta": "GLOBAL GAS"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "GLOBAL",
+      "carpeta": "GLOBAL ATF"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "HIDRAULICO",
+      "carpeta": "GLOBAL TERMICO"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "GLOBAL FORK",
+      "carpeta": "FORK"
+    }
+  },
+  {
+    "model": "misc.marca",
+    "fields": {
+      "nombre": "ACEITE ROSCADO",
+      "carpeta": "OTROS"
+    }
+  }
+]
