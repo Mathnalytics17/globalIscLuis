@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from django.contrib.contenttypes.models import ContentType
 class PruebaViewSet(viewsets.ModelViewSet):
-    queryset = Prueba.objects.prefetch_related('relaciones')
+    queryset = Prueba.objects.all()
     serializer_class = PruebaSerializer
     
     def get_queryset(self):

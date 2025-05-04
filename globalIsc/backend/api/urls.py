@@ -18,7 +18,7 @@ from apps.reporte.api.views.index import ReporteViewSet
 from apps.resultado.api.views.index import ResultadoViewSet
 from apps.misc.api.views.tipoEquipo.index import TipoEquipoViewSet,ReferenciaEquipoViewSet
 from apps.misc.api.views.limitesyaux.index import ElementoAnalisisViewSet,LimiteCalidadListCreateView,LimiteCalidadRetrieveUpdateDestroyView,LimiteViscosidadListCreateView,LimiteViscosidadRetrieveUpdateDestroyView
-from apps.misc.api.views.more.index import MarcaGrasaListCreateView,MarcaGrasaRetrieveUpdateDestroyView,MarcaRetrieveUpdateDestroyView,MarcaListCreateView,CalidadListCreateView,CalidadRetrieveUpdateDestroyView,ColorGrasaListCreateView,ColorGrasaRetrieveUpdateDestroyView,ColorListCreateView,ColorRetrieveUpdateDestroyView,NLGIRetrieveUpdateDestroyView,NLGIListCreateView,JabonListCreateView,JabonRetrieveUpdateDestroyView,ComentarioPredefinidoListCreateView,ComentarioPredefinidoRetrieveUpdateDestroyView
+from apps.misc.api.views.more.index import get_all_content_types,content_type_detail,SistemaFiltracionDetailView,SistemaFiltracionListCreateView,MarcaGrasaListCreateView,MarcaGrasaRetrieveUpdateDestroyView,MarcaRetrieveUpdateDestroyView,MarcaListCreateView,CalidadListCreateView,CalidadRetrieveUpdateDestroyView,ColorGrasaListCreateView,ColorGrasaRetrieveUpdateDestroyView,ColorListCreateView,ColorRetrieveUpdateDestroyView,NLGIRetrieveUpdateDestroyView,NLGIListCreateView,JabonListCreateView,JabonRetrieveUpdateDestroyView,ComentarioPredefinidoListCreateView,ComentarioPredefinidoRetrieveUpdateDestroyView
 # Configuración de ViewSets para Máquinas
 maquina_viewset = MaquinaViewSet.as_view({
     'get': 'list',
@@ -249,6 +249,13 @@ urlpatterns = [
     
     # Límites de Calidad
     path('limites-calidad/', LimiteCalidadListCreateView.as_view(), name='limitecalidad-list'),
-    path('limites-calidad/<int:pk>/', LimiteCalidadRetrieveUpdateDestroyView.as_view(), name='limitecalidad-detail')
+    path('limites-calidad/<int:pk>/', LimiteCalidadRetrieveUpdateDestroyView.as_view(), name='limitecalidad-detail'),
 
+    path('sistemas-filtracion/', SistemaFiltracionListCreateView.as_view(), name='sistemas-filtracion-list'),
+    path('sistemas-filtracion/<int:pk>/', SistemaFiltracionDetailView.as_view(), name='sistemas-filtracion-detail'),
+
+   
+    # O con DRF:
+    path('content/<int:pk>/', content_type_detail, name='content-type-detail'),
+    path('content/', get_all_content_types, name='all-content-types'),
 ]

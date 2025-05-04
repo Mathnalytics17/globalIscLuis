@@ -1,7 +1,7 @@
 
 from rest_framework import serializers
 from ...models.index import Marca, Calidad, Color, MarcaGrasa, NLGI, Jabon, ColorGrasa
-from apps.misc.api.models.more.index import ComentarioPredefinido
+from apps.misc.api.models.more.index import ComentarioPredefinido,SistemaFiltracion
 
 class MarcaSerializer(serializers.ModelSerializer):
     class Meta:
@@ -45,4 +45,9 @@ class JabonSerializer(serializers.ModelSerializer):
 class ColorGrasaSerializer(serializers.ModelSerializer):
     class Meta:
         model = ColorGrasa
+        fields = '__all__'
+
+class SistemaFiltracionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SistemaFiltracion
         fields = '__all__'

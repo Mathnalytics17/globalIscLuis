@@ -67,3 +67,17 @@ class ColorGrasa(models.Model):
     
     def __str__(self):
         return self.nombre
+    
+
+
+class SistemaFiltracion(models.Model):
+    codigo_iso = models.CharField(max_length=50)
+    tipo_sistema = models.TextField()
+    componentes_tipicos = models.TextField()
+    sensibilidad = models.CharField(max_length=50)
+    um_4 = models.IntegerField()
+    um_6 = models.IntegerField()
+    um_14 = models.IntegerField()
+
+    def __str__(self):
+        return f"{self.codigo_iso} - {self.tipo_sistema[:50]}..."

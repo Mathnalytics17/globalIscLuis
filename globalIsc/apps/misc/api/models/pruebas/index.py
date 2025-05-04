@@ -36,7 +36,8 @@ class RelacionPruebaLimite(models.Model):
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     object_id = models.PositiveIntegerField()
     limite = GenericForeignKey('content_type', 'object_id')
-    
+    type_operation=models.CharField(max_length=200,default='equal',null=True)
+    symbol_operation=models.CharField(max_length=200,default='equal',null=True)
     # Campos adicionales para la relación
     tipo_equipo = models.CharField(max_length=100)
     tipo_lubricante = models.CharField(max_length=100)

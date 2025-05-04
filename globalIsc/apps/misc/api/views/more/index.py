@@ -3,12 +3,12 @@ from ...models.index import Marca,  Calidad, Color, MarcaGrasa, NLGI, Jabon, Col
 from apps.misc.api.serializers.more.index import (MarcaSerializer,ComentarioPredefinidoSerializer, 
                          CalidadSerializer, ColorSerializer, 
                          MarcaGrasaSerializer, NLGISerializer,
-                         JabonSerializer, ColorGrasaSerializer)
-from apps.misc.api.models.more.index import ComentarioPredefinido
+                         JabonSerializer, ColorGrasaSerializer,SistemaFiltracionSerializer)
+from apps.misc.api.models.more.index import ComentarioPredefinido,SistemaFiltracion
 
 
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
-
+from rest_framework import generics
 # Vista genérica para todos los modelos
 class BaseListCreateView(ListCreateAPIView):
     pagination_class = None  # Desactiva paginación para fixtures
@@ -90,3 +90,55 @@ class ComentarioPredefinidoRetrieveUpdateDestroyView(BaseDetailView):
     serializer_class = ComentarioPredefinidoSerializer
 
 
+class SistemaFiltracionListCreateView(generics.ListCreateAPIView):
+    queryset = SistemaFiltracion.objects.all()
+    serializer_class = SistemaFiltracionSerializer
+
+class SistemaFiltracionDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = SistemaFiltracion.objects.all()
+    serializer_class = SistemaFiltracionSerializer
+
+
+from django.contrib.contenttypes.models import ContentType
+from django.shortcuts import get_object_or_404
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from django.contrib.contenttypes.models import ContentType
+
+@api_view(['GET'])
+def content_type_detail(request, pk):
+    try:
+        content_type = ContentType.objects.get(pk=pk)
+        data = {
+            'id': content_type.id,
+            'app_label': content_type.app_label,
+            'model': content_type.model,
+            
+        }
+        return Response(data)
+    except ContentType.DoesNotExist:
+        return Response({'error': 'ContentType not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+@api_view(['GET'])
+def get_all_content_types(request):
+    try:
+        # Obtener todos los content types
+        content_types = ContentType.objects.all().order_by('app_label', 'model')
+        
+        # Serializar los datos
+        data = [
+            {
+                'id': ct.id,
+                'app_label': ct.app_label,
+                'model': ct.model,
+                'name': str(ct)  # Esto devuelve la representación legible
+            }
+            for ct in content_types
+        ]
+        
+        return Response(data)
+    
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
