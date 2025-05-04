@@ -79,6 +79,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.altasfundacionaladina.org",
     "https://altasfundacionaladina.org",
     "http://82.112.250.23:3000",
+    "http://82.25.95.14:3000"
       "http://127.0.0.1:3000",
     
 ]
@@ -88,6 +89,7 @@ CORS_TRUSTED_ORIGINS = [
     "http://localhost:3000",  # React/Vue/Angular en desarrollo
     "http://82.112.250.23",  # Dominio en producción
     "http://82.112.250.23:1337",
+    "http://82.25.95.14:3000"
     "https://www.altasfundacionaladina.org",
     "https://altasfundacionaladina.org",
     "http://82.112.250.23:3000",
@@ -100,6 +102,7 @@ CORS_ORIGINS_WHITELIST = [
     "http://82.112.250.23:1337",
     "https://altasfundacionaladina.org",
     "http://82.112.250.23:3000",
+    "http://82.25.95.14:3000"
 ]
 
 MIDDLEWARE = [
