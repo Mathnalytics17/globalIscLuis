@@ -3,11 +3,14 @@ version: '3.8'
 services:
   nginx:
     build: ./nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d/aladino.conf:/etc/nginx/conf.d/aladino.conf
+      - ./nginx/ssl:/etc/nginx/ssl
     ports:
       - "80:80"
       - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/nginx.conf
+      - "8000:8000"
      
     depends_on:
       - web
