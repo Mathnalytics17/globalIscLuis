@@ -1,0 +1,66 @@
+[
+  {
+    "model": "misc.comentariopredefinido",
+    "fields": {
+      "texto": "Cambio de aceite realizado según programa de mantenimiento",
+      "tipo": "NORMAL",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.comentariopredefinido",
+    "fields": {
+      "texto": "Aceite dentro de parámetros normales",
+      "tipo": "NORMAL",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.comentariopredefinido",
+    "fields": {
+      "texto": "Viscosidad dentro de rango aceptable",
+      "tipo": "NORMAL",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.comentariopredefinido",
+    "fields": {
+      "texto": "Contaminación por agua detectada",
+      "tipo": "NO_DESEADO",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.comentariopredefinido",
+    "fields": {
+      "texto": "Presencia de partículas metálicas",
+      "tipo": "NO_DESEADO",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.comentariopredefinido",
+    "fields": {
+      "texto": "Oxidación avanzada del lubricante",
+      "tipo": "NO_DESEADO",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.comentariopredefinido",
+    "fields": {
+      "texto": "Viscosidad fuera de especificación",
+      "tipo": "NO_DESEADO",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.comentariopredefinido",
+    "fields": {
+      "texto": "Contaminación por combustible",
+      "tipo": "NO_DESEADO",
+      "activo": true
+    }
+  }
+]

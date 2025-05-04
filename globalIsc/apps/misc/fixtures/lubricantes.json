@@ -1,0 +1,57 @@
+[
+    {
+      "model": "misc.lubricante",
+      "pk": 1,
+      "fields": {
+        "referencia": "MOBILGEAR 600 XP 320",
+        "nombre_comercial": "Mobilgear 600 XP",
+        "grado_viscosidad": "ISO VG 320",
+        "nivel_desempeno": "API GL-5",
+        "fabricante": "ExxonMobil"
+      }
+    },
+    {
+      "model": "misc.lubricante",
+      "pk": 2,
+      "fields": {
+        "referencia": "SHELL OMALA S4 GX 220",
+        "nombre_comercial": "Shell Omala S4 GX",
+        "grado_viscosidad": "ISO VG 220",
+        "nivel_desempeno": "DIN 51517",
+        "fabricante": "Shell"
+      }
+    },
+    {
+      "model": "misc.lubricante",
+      "pk": 3,
+      "fields": {
+        "referencia": "TOTAL EQUIVIS ZS 68",
+        "nombre_comercial": "Total Equivis ZS",
+        "grado_viscosidad": "ISO VG 68",
+        "nivel_desempeno": "AGMA 9005-E02",
+        "fabricante": "Total"
+      }
+    },
+    {
+      "model": "misc.lubricante",
+      "pk": 4,
+      "fields": {
+        "referencia": "CASTROL OPTIGEAR SYN 150",
+        "nombre_comercial": "Castrol Optigear Synthetic",
+        "grado_viscosidad": "ISO VG 150",
+        "nivel_desempeno": "API GL-4",
+        "fabricante": "Castrol"
+      }
+    },
+    {
+      "model": "misc.lubricante",
+      "pk": 5,
+      "fields": {
+        "referencia": "FUCHS RENOLIN B 46",
+        "nombre_comercial": "Fuchs Renolin B",
+        "grado_viscosidad": "ISO VG 46",
+        "nivel_desempeno": "DIN 51502",
+        "fabricante": "Fuchs"
+      }
+    }
+  ]

@@ -1,0 +1,79 @@
+[
+    {
+      "model": "misc.tipoequipo",
+      "pk": 1,
+      "fields": {
+        "nombre": "Motor Diesel",
+        "descripcion": "Motores de combustión interna que funcionan con diesel"
+      }
+    },
+    {
+      "model": "misc.tipoequipo",
+      "pk": 2,
+      "fields": {
+        "nombre": "Compresor",
+        "descripcion": "Equipos para comprimir aire o gases"
+      }
+    },
+    {
+      "model": "misc.tipoequipo",
+      "pk": 3,
+      "fields": {
+        "nombre": "Reductor",
+        "descripcion": "Cajas reductoras de velocidad"
+      }
+    },
+    {
+      "model": "misc.tipoequipo",
+      "pk": 4,
+      "fields": {
+        "nombre": "Sistema Hidráulico",
+        "descripcion": "Equipos con componentes hidráulicos"
+      }
+    },
+    {
+      "model": "misc.referenciaequipo",
+      "pk": 1,
+      "fields": {
+        "tipo": 1,
+        "codigo": "MD-5000",
+        "descripcion": "Motor diesel de 5000 RPM, 200HP"
+      }
+    },
+    {
+      "model": "misc.referenciaequipo",
+      "pk": 2,
+      "fields": {
+        "tipo": 1,
+        "codigo": "MD-3000",
+        "descripcion": "Motor diesel de 3000 RPM, 150HP"
+      }
+    },
+    {
+      "model": "misc.referenciaequipo",
+      "pk": 3,
+      "fields": {
+        "tipo": 2,
+        "codigo": "CP-100",
+        "descripcion": "Compresor de aire de 100PSI"
+      }
+    },
+    {
+      "model": "misc.referenciaequipo",
+      "pk": 4,
+      "fields": {
+        "tipo": 3,
+        "codigo": "RD-200",
+        "descripcion": "Reductor de velocidad 1:200"
+      }
+    },
+    {
+      "model": "misc.referenciaequipo",
+      "pk": 5,
+      "fields": {
+        "tipo": 4,
+        "codigo": "SH-500",
+        "descripcion": "Sistema hidráulico de 500 bar"
+      }
+    }
+  ]

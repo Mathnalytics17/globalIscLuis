@@ -1,0 +1,592 @@
+[
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 10W-60",
+        "vmin": 21.9,
+        "vmax": 26.1,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 15W-60",
+        "vmin": 21.9,
+        "vmax": 26.1,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 20W-60",
+        "vmin": 21.9,
+        "vmax": 26.1,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 25W-60",
+        "vmin": 21.9,
+        "vmax": 26.1,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 60",
+        "vmin": 21.9,
+        "vmax": 26.1,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 10W-50",
+        "vmin": 16.3,
+        "vmax": 21.9,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 15W-50",
+        "vmin": 16.3,
+        "vmax": 21.9,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 20W-50",
+        "vmin": 16.3,
+        "vmax": 21.9,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 25W-50",
+        "vmin": 16.3,
+        "vmax": 21.9,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 50",
+        "vmin": 16.3,
+        "vmax": 21.9,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 5W-40",
+        "vmin": 12.5,
+        "vmax": 16.3,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 10W-40",
+        "vmin": 12.5,
+        "vmax": 16.3,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 15W-40",
+        "vmin": 12.5,
+        "vmax": 16.3,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 20W-40",
+        "vmin": 12.5,
+        "vmax": 16.3,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 25W-40",
+        "vmin": 12.5,
+        "vmax": 16.3,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 40",
+        "vmin": 12.5,
+        "vmax": 16.3,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 0W-30",
+        "vmin": 9.3,
+        "vmax": 12.5,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 5W-30",
+        "vmin": 9.3,
+        "vmax": 12.5,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 10W-30",
+        "vmin": 9.3,
+        "vmax": 12.5,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 15W-30",
+        "vmin": 9.3,
+        "vmax": 12.5,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 20W-30",
+        "vmin": 9.3,
+        "vmax": 12.5,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 25W-30",
+        "vmin": 9.3,
+        "vmax": 12.5,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 30",
+        "vmin": 9.3,
+        "vmax": 12.5,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 0W-20",
+        "vmin": 5.6,
+        "vmax": 9.3,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 5W-20",
+        "vmin": 5.6,
+        "vmax": 9.3,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 10W-20",
+        "vmin": 5.6,
+        "vmax": 9.3,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 15W-20",
+        "vmin": 5.6,
+        "vmax": 9.3,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 20W-20",
+        "vmin": 5.6,
+        "vmax": 9.3,
+        "iv1": 115,
+        "iv2": 120
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 20",
+        "vmin": 5.6,
+        "vmax": 9.3,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 70W-90",
+        "vmin": 13.5,
+        "vmax": 18.5,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 75W-90",
+        "vmin": 13.5,
+        "vmax": 18.5,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 80W-90",
+        "vmin": 13.5,
+        "vmax": 18.5,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 85W-90",
+        "vmin": 13.5,
+        "vmax": 18.5,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 90",
+        "vmin": 13.5,
+        "vmax": 18.5,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 75W-140",
+        "vmin": 24,
+        "vmax": 32.5,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 80W-140",
+        "vmin": 24,
+        "vmax": 32.5,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 85W-140",
+        "vmin": 24,
+        "vmax": 32.5,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 0W",
+        "vmin": 3.8,
+        "vmax": null,
+        "iv1": 105,
+        "iv2": 105
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 5W",
+        "vmin": 3.8,
+        "vmax": null,
+        "iv1": 105,
+        "iv2": 105
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 10W",
+        "vmin": 4.1,
+        "vmax": 7,
+        "iv1": 105,
+        "iv2": 105
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 15W",
+        "vmin": 5.6,
+        "vmax": null,
+        "iv1": 105,
+        "iv2": 105
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 20W",
+        "vmin": 5.6,
+        "vmax": null,
+        "iv1": 105,
+        "iv2": 105
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 25W",
+        "vmin": 9.3,
+        "vmax": null,
+        "iv1": 105,
+        "iv2": 105
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "SAE 140",
+        "vmin": 24,
+        "vmax": 32.5,
+        "iv1": 90,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 10",
+        "vmin": 9,
+        "vmax": 11,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 15",
+        "vmin": 13.5,
+        "vmax": 16.5,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 22",
+        "vmin": 19.8,
+        "vmax": 24.2,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 32",
+        "vmin": 28.8,
+        "vmax": 35.2,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 46",
+        "vmin": 41.4,
+        "vmax": 50.6,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 68",
+        "vmin": 61.2,
+        "vmax": 74.8,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 100",
+        "vmin": 90,
+        "vmax": 110,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 150",
+        "vmin": 135,
+        "vmax": 165,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 220",
+        "vmin": 198,
+        "vmax": 242,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 320",
+        "vmin": 288,
+        "vmax": 352,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 460",
+        "vmin": 414,
+        "vmax": 506,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 680",
+        "vmin": 612,
+        "vmax": 748,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ISO 1000",
+        "vmin": 900,
+        "vmax": 1100,
+        "iv1": 140,
+        "iv2": 90
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "ATF",
+        "vmin": null,
+        "vmax": null,
+        "iv1": null,
+        "iv2": null
+      }
+    },
+    {
+      "model": "misc.limiteviscosidad",
+      "fields": {
+        "tipo": "2T",
+        "vmin": null,
+        "vmax": null,
+        "iv1": null,
+        "iv2": null
+      }
+    }
+  ]

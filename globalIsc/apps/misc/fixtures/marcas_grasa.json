@@ -1,0 +1,72 @@
+[
+  {
+    "model": "misc.marcagrasa",
+    "fields": {
+      "nombre": "GRASA COPAS",
+      "color": 1
+    }
+  },
+  {
+    "model": "misc.marcagrasa",
+    "fields": {
+      "nombre": "GRASA CHASIS",
+      "color": 2
+    }
+  },
+  {
+    "model": "misc.marcagrasa",
+    "fields": {
+      "nombre": "GRASA AZUL ALTO IMPACTO",
+      "color": 4
+    }
+  },
+  {
+    "model": "misc.marcagrasa",
+    "fields": {
+      "nombre": "GRASA LITIO EP",
+      "color": 2
+    }
+  },
+  {
+    "model": "misc.marcagrasa",
+    "fields": {
+      "nombre": "GRASA RODAMIENTOS",
+      "color": 3
+    }
+  },
+  {
+    "model": "misc.marcagrasa",
+    "fields": {
+      "nombre": "GRASA COMPLEJA DE LITIO",
+      "color": 4
+    }
+  },
+  {
+    "model": "misc.marcagrasa",
+    "fields": {
+      "nombre": "GRASA CALCIO CHASIS BEG",
+      "color": 2
+    }
+  },
+  {
+    "model": "misc.marcagrasa",
+    "fields": {
+      "nombre": "GRASA LITIO EP BEG",
+      "color": 5
+    }
+  },
+  {
+    "model": "misc.marcagrasa",
+    "fields": {
+      "nombre": "GRASA NEO CHASIS",
+      "color": 2
+    }
+  },
+  {
+    "model": "misc.marcagrasa",
+    "fields": {
+      "nombre": "GRASA NEO AZUL ALTO IMPACTO",
+      "color": 4
+    }
+  }
+]

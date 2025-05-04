@@ -1,0 +1,16 @@
+[
+  {"model": "misc.nlgi", "fields": {"grado": "000", "minimo": 445, "maximo": 475}},
+  {"model": "misc.nlgi", "fields": {"grado": "00", "minimo": 400, "maximo": 430}},
+  {"model": "misc.nlgi", "fields": {"grado": "0", "minimo": 355, "maximo": 385}},
+  {"model": "misc.nlgi", "fields": {"grado": "1", "minimo": 310, "maximo": 340}},
+  {"model": "misc.nlgi", "fields": {"grado": "1.5", "minimo": 295, "maximo": 310}},
+  {"model": "misc.nlgi", "fields": {"grado": "2", "minimo": 265, "maximo": 295}},
+  {"model": "misc.nlgi", "fields": {"grado": "2.5", "minimo": 250, "maximo": 265}},
+  {"model": "misc.nlgi", "fields": {"grado": "3", "minimo": 220, "maximo": 250}},
+  {"model": "misc.nlgi", "fields": {"grado": "3.5", "minimo": 205, "maximo": 220}},
+  {"model": "misc.nlgi", "fields": {"grado": "4", "minimo": 175, "maximo": 205}},
+  {"model": "misc.nlgi", "fields": {"grado": "4.5", "minimo": 160, "maximo": 175}},
+  {"model": "misc.nlgi", "fields": {"grado": "5", "minimo": 130, "maximo": 160}},
+  {"model": "misc.nlgi", "fields": {"grado": "5.5", "minimo": 115, "maximo": 130}},
+  {"model": "misc.nlgi", "fields": {"grado": "6", "minimo": 85, "maximo": 115}}
+]

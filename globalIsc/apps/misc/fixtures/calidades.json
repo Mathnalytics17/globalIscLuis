@@ -1,0 +1,8 @@
+[
+  {"model": "misc.calidad", "fields": {"tipo": "API"}},
+  {"model": "misc.calidad", "fields": {"tipo": "ISO-L-"}},
+  {"model": "misc.calidad", "fields": {"tipo": "JASO"}},
+  {"model": "misc.calidad", "fields": {"tipo": "DX"}},
+  {"model": "misc.calidad", "fields": {"tipo": "TDH"}},
+  {"model": "misc.calidad", "fields": {"tipo": "EP"}}
+]

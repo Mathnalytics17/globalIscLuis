@@ -1,0 +1,362 @@
+[
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API CF",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API CF-4",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API CG-4",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API CH-4",
+        "espuma1": "10/0",
+        "espuma2": "20/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API CI-4",
+        "espuma1": "10/0",
+        "espuma2": "20/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API CJ-4",
+        "espuma1": "10/0",
+        "espuma2": "20/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API CK-4",
+        "espuma1": "10/0",
+        "espuma2": "20/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API SF",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API SG",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API SH",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API SJ",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API SL",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API SM",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API SN",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API SP",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API GL-1",
+        "espuma1": "20/0",
+        "espuma2": "50/0",
+        "espuma3": "20/0",
+        "chispa": 170
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API GL-4",
+        "espuma1": "20/0",
+        "espuma2": "50/0",
+        "espuma3": "20/0",
+        "chispa": 170
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "API GL-5",
+        "espuma1": "20/0",
+        "espuma2": "50/0",
+        "espuma3": "20/0",
+        "chispa": 170
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "ISO-L- HH",
+        "espuma1": null,
+        "espuma2": null,
+        "espuma3": null,
+        "chispa": 165
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "ISO-L- HL",
+        "espuma1": "150/0",
+        "espuma2": "75/0",
+        "espuma3": "150/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "ISO-L- HM",
+        "espuma1": "150/0",
+        "espuma2": "75/0",
+        "espuma3": "150/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "ISO-L- HV",
+        "espuma1": "150/0",
+        "espuma2": "75/0",
+        "espuma3": "150/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "JASO FA",
+        "espuma1": null,
+        "espuma2": null,
+        "espuma3": null,
+        "chispa": 70
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "JASO FB",
+        "espuma1": null,
+        "espuma2": null,
+        "espuma3": null,
+        "chispa": 70
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "JASO FC",
+        "espuma1": null,
+        "espuma2": null,
+        "espuma3": null,
+        "chispa": 70
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "JASO FD",
+        "espuma1": null,
+        "espuma2": null,
+        "espuma3": null,
+        "chispa": 70
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "JASO MA",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "JASO MA1",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "JASO MA2",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "JASO MB",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "DX II",
+        "espuma1": null,
+        "espuma2": null,
+        "espuma3": null,
+        "chispa": 170
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "DX III",
+        "espuma1": null,
+        "espuma2": null,
+        "espuma3": null,
+        "chispa": 170
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "TDH",
+        "espuma1": null,
+        "espuma2": null,
+        "espuma3": null,
+        "chispa": 190
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "EP",
+        "espuma1": null,
+        "espuma2": null,
+        "espuma3": null,
+        "chispa": 170
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "TCW3",
+        "espuma1": null,
+        "espuma2": null,
+        "espuma3": null,
+        "chispa": 70
+      }
+    },
+    {
+      "model": "misc.limitecalidad",
+      "fields": {
+        "tipo": "GAS LA",
+        "espuma1": "10/0",
+        "espuma2": "50/0",
+        "espuma3": "10/0",
+        "chispa": 190
+      }
+    }
+  ]
