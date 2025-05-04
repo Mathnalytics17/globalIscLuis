@@ -31,7 +31,7 @@ SECRET_KEY = 'django-insecure-u8*sd_ika1*x+ww@$j5)u8-(m6%&k)=7l4kr=5ayd1@(l36mf_
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['82.25.95.14']
 
 
 # Application definition
@@ -58,7 +58,7 @@ SESSION_COOKIE_SAMESITE = 'None'  # Necesario para cross-site cookies
 SESSION_COOKIE_SECURE = True  # Solo enviar cookies sobre HTTPS (en producción)
 CSRF_COOKIE_SAMESITE = 'None'
 CSRF_COOKIE_SECURE = True
-FRONTEND_URL='http://localhost:3000'
+FRONTEND_URL='http://82.25.95.14:3000/'
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -168,6 +168,7 @@ DATABASES = {
         'PORT': '5432',        # Reemplaza con el puerto de tu servidor PostgreSQL (el puerto por defecto es 5432)
     }
 }
+
 
 
 # Password validation
