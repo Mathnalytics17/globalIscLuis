@@ -8,20 +8,15 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/nginx.conf
-      - /etc/letsencrypt/live/www.altasfundacionaladina.org/fullchain.pem:/etc/letsencrypt/live/www.altasfundacionaladina.org/fullchain.pem
-      - /etc/letsencrypt/live/www.altasfundacionaladina.org/privkey.pem:/etc/letsencrypt/live/www.altasfundacionaladina.org/privkey.pem
-      - /etc/letsencrypt/live/api.altasfundacionaladina.org/fullchain.pem:/etc/letsencrypt/live/api.altasfundacionaladina.org/fullchain.pem
-      - /etc/letsencrypt/live/api.altasfundacionaladina.org/privkey.pem:/etc/letsencrypt/live/api.altasfundacionaladina.org/privkey.pem
-      - /etc/letsencrypt/options-ssl-nginx.conf:/etc/letsencrypt/options-ssl-nginx.conf
-      - /etc/letsencrypt/ssl-dhparams.pem:/etc/letsencrypt/ssl-dhparams.pem
+     
     depends_on:
       - web
 
   web:
-    build: ./aladinosWebPrueba
+    build: ./globalIsc
     command: gunicorn backend.wsgi:application --bind 0.0.0.0:8000
     volumes:
-      - ./aladinosWebPrueba/:/usr/src/backend/
+      - ./globalIsc/:/usr/src/backend/
     ports:
       - "8000:8000"
     env_file:
@@ -30,7 +25,7 @@ services:
       - db
 
   daphne:
-    build: ./aladinosWebPrueba
+    build: ./globalIsc
     command: daphne --bind 0.0.0.0 -p 8002 backend.asgi:application
     ports:
       - "8002:8002"
