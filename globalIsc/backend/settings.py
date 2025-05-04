@@ -31,7 +31,7 @@ SECRET_KEY = 'django-insecure-u8*sd_ika1*x+ww@$j5)u8-(m6%&k)=7l4kr=5ayd1@(l36mf_
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['82.25.95.14']
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -79,7 +79,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.altasfundacionaladina.org",
     "https://altasfundacionaladina.org",
     "http://82.112.250.23:3000",
-    "http://82.25.95.14:3000"
+    "http://82.25.95.14:3000",
+    "http://82.25.95.14:8000",
       "http://127.0.0.1:3000",
     
 ]
@@ -93,6 +94,7 @@ CORS_TRUSTED_ORIGINS = [
     "https://www.altasfundacionaladina.org",
     "https://altasfundacionaladina.org",
     "http://82.112.250.23:3000",
+    "http://82.25.95.14:8000",
 ]
 
 
@@ -102,7 +104,8 @@ CORS_ORIGINS_WHITELIST = [
     "http://82.112.250.23:1337",
     "https://altasfundacionaladina.org",
     "http://82.112.250.23:3000",
-    "http://82.25.95.14:3000"
+    "http://82.25.95.14:3000",
+    "http://82.25.95.14:8000",
 ]
 
 MIDDLEWARE = [
