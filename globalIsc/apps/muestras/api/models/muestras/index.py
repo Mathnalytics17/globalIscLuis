@@ -4,6 +4,7 @@ from django.core.validators import MinValueValidator
 import uuid
 from apps.misc.api.models.lubricante.index import Lubricante
 from apps.misc.api.models.tipoEquipo.index import TipoEquipo,ReferenciaEquipo
+from apps.activesTree.api.models.machines.index import Maquina
 from django.utils import timezone
 
 class Muestra(models.Model):
@@ -17,7 +18,7 @@ class Muestra(models.Model):
     id = models.CharField(max_length=20, primary_key=True)  # M20230001
     fecha_toma = models.DateTimeField()
     lubricante = models.ForeignKey(Lubricante, on_delete=models.PROTECT)
-   
+    Equipo = models.ForeignKey(Maquina, on_delete=models.PROTECT,default=1)
     contacto_cliente = models.CharField(max_length=100, blank=True, null=True)
     equipo_placa = models.CharField(max_length=50, blank=True, null=True)
     referencia_equipo = models.ForeignKey(ReferenciaEquipo, on_delete=models.PROTECT, blank=True, null=True)
