@@ -5,7 +5,7 @@ from django.shortcuts import get_object_or_404
 from apps.muestras.api.models.muestras.index import Muestra
 from apps.muestras.api.serializers.muestras.index import MuestraSerializer, CreateMuestraSerializer
 from django.utils import timezone
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 
 class MuestraViewSet(viewsets.ModelViewSet):
     queryset = Muestra.objects.all()

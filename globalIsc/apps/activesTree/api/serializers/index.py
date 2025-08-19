@@ -1,17 +1,21 @@
 
 from ..models.index import Carpeta
 from ..models.analysis.index import AnalisisLubricante
-from ..models.machines.index import Maquina
+from apps.activesTree.api.models.machines.index import Maquina
 from ..models.resultsAnalysis.index import ResultadoMuestrasAceite
 
 from rest_framework import serializers
        
 class CarpetaSerializer(serializers.ModelSerializer):
-    
+    muestras = serializers.SerializerMethodField()
+
+    def get_muestras(self, obj):
+        from apps.muestras.api.serializers.muestras.index import MuestraSerializer
+        return MuestraSerializer(obj.muestras).data
+
     class Meta:
         model = Carpeta
         fields = '__all__'
-
 
 class MaquinaSerializer(serializers.ModelSerializer):
 

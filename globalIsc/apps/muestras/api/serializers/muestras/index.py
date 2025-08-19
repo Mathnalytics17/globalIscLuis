@@ -3,6 +3,7 @@ from apps.misc.api.serializers.lubricante.index import LubricanteSerializer
 from apps.misc.api.serializers.tipoEquipo.index import ReferenciaEquipoSerializer
 from apps.users.api.serializers.index import UserSerializer
 from apps.muestras.api.models.muestras.index import Muestra
+from apps.activesTree.api.serializers.index import MaquinaSerializer
 
 
 class MuestraSerializer(serializers.ModelSerializer):
@@ -10,7 +11,7 @@ class MuestraSerializer(serializers.ModelSerializer):
     lubricante = LubricanteSerializer()
     referencia_equipo = ReferenciaEquipoSerializer()
     usuario_registro = UserSerializer()
-    
+    Equipo=MaquinaSerializer()
     class Meta:
         model = Muestra
         fields = '__all__'

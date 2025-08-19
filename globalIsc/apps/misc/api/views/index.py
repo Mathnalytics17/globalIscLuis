@@ -5,9 +5,8 @@ from .limitesyaux.index import (
     CategoriaLimiteViewSet,
     LimiteElementoViewSet,
     ComentarioElementoViewSet,
-    LimiteViscosidadViewSet,
-    LimiteCalidadViewSet
+   
 )
 from .lubricante.index import LubricanteViewSet
-from .pruebas.index import PruebaViewSet, EquipoLaboratorioViewSet
+from .pruebas.index import PruebaViewSet
 from .tipoEquipo.index import TipoEquipoViewSet, ReferenciaEquipoViewSet

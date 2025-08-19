@@ -35,8 +35,6 @@ class ReferenciaEquipoAdmin(admin.ModelAdmin):
 class PruebaAdmin(admin.ModelAdmin):
     pass
 
-# Configuración para EquipoLaboratorio
-
 
 # Configuración para CategoriaLimite
 @admin.register(CategoriaLimite)
