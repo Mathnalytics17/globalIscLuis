@@ -42,5 +42,6 @@ services:
       - POSTGRES_PASSWORD=postgrespassword
       - POSTGRES_DB=backend
 
+
 volumes:
   postgres_data:
