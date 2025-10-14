@@ -20,11 +20,66 @@ from rest_framework import permissions
 
 
 
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from django.db import transaction
 
+from apps.activesTree.api.models.index import Empresa
 
-
-
-
+class SyncCompanyRootFolders(APIView):
+    """
+    Endpoint para sincronizar carpetas root con empresas existentes
+    Crea carpetas root automáticamente para empresas que no las tengan
+    """
+    permission_classes = [AllowAny]
+    def post(self, request):
+        try:
+            with transaction.atomic():
+                # Obtener todas las empresas activas
+                companies = Empresa.objects.filter(is_active=True)
+                # Obtener carpetas root existentes
+                existing_roots = Carpeta.objects.filter(typeFolder='root')
+                
+                # Encontrar empresas que no tienen carpeta root
+                companies_without_root = companies.exclude(
+                    id__in=existing_roots.values_list('compania_id', flat=True)
+                )
+                
+                created_folders = []
+                for company in companies_without_root:
+                    folder = Carpeta.objects.create(
+                        nombre=company.nombre,
+                        typeFolder='root',
+                        compania=company,
+                        id_parent_node='-1',  # Según tu modelo
+                        parentId="root",      # Según tu modelo
+                        isMachine=False,
+                        is_pt_medida=False
+                    )
+                    created_folders.append({
+                        'id': folder.id,
+                        'nombre': folder.nombre,
+                        'empresa_id': company.id,
+                        'empresa_nombre': company.nombre
+                    })
+                    print(f"✅ Carpeta root creada: {folder.nombre} para empresa: {company.nombre}")
+                
+                return Response({
+                    'success': True,
+                    'message': f'Se crearon {len(created_folders)} carpetas root',
+                    'created_folders': created_folders,
+                    'total_empresas': companies.count(),
+                    'empresas_sin_carpeta': companies_without_root.count()
+                }, status=status.HTTP_200_OK)
+                
+        except Exception as e:
+            print(f"❌ Error en SyncCompanyRootFolders: {str(e)}")
+            return Response({
+                'success': False,
+                'error': str(e),
+                'message': 'Error al sincronizar carpetas root'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 

@@ -7,7 +7,7 @@ from apps.users.api.views.user.index import (
     ForgotPasswordView, PasswordResetConfirmView, CurrentUserView)
 from apps.misc.api.views.companies.index import EmpresaViewSet
 from apps.misc.api.views.roles.index import RolViewSet
-from apps.activesTree.api.views.index import MaquinaViewSet, FolderViewSet, AnalisisLubricanteViewSet, ResultadoMuestrasAceiteViewSet
+from apps.activesTree.api.views.index import MaquinaViewSet, SyncCompanyRootFolders,FolderViewSet, AnalisisLubricanteViewSet, ResultadoMuestrasAceiteViewSet
 from apps.activesTree.api.views.activesTree.index import ActivesTreeViewSet
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from apps.misc.api.views.lubricante.index import LubricanteViewSet
@@ -108,6 +108,7 @@ urlpatterns = [
          name='flat-structure'),
 
     
+     path('sync-company-roots/', SyncCompanyRootFolders.as_view(), name='sync-company-roots'),
     path('lubrication/equipment-types/',TipoEquipoViewSet.as_view({
         'get': 'list',
         'post': 'create'
