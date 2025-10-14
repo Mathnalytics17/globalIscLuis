@@ -62,13 +62,16 @@ INSTALLED_APPS = [
 
 
 
-CORS_ALLOW_CREDENTIALS = True  # Permite el envío de credenciales (cookies, auth headers)
 
 SESSION_COOKIE_SAMESITE = 'None'  # Necesario para cross-site cookies
 SESSION_COOKIE_SECURE = True  # Solo enviar cookies sobre HTTPS (en producción)
 CSRF_COOKIE_SAMESITE = 'None'
 CSRF_COOKIE_SECURE = True
-FRONTEND_URL='http://localhost:3000/'
+FRONTEND_URL='http://195.250.25.25:3000/'
+
+
+ROOT_URLCONF = 'backend.urls'
+
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -81,47 +84,24 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
     'access-control-allow-origin',
 ]
-
-ROOT_URLCONF = 'backend.urls'
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000", 
-    "http://195.250.25.25",
     "http://195.250.25.25:3000",
-    "http://195.250.25.25:8000",
-    "https://www.altasfundacionaladina.org",
-    "https://altasfundacionaladina.org",
 ]
 
+CORS_ALLOW_CREDENTIALS = True
+CORS_EXPOSE_HEADERS = ['content-type', 'authorization']
 
-CORS_TRUSTED_ORIGINS = [
-    "http://localhost:3000",  # React/Vue/Angular en desarrollo
-    "http://195.250.25.25",  # Dominio en producción
-    "http://195.250.25.25:1337",
-    "http://195.250.25.25:3000"
-    "https://www.altasfundacionaladina.org",
-    "https://altasfundacionaladina.org",
-    "http://195.250.25.25:3000",
-    "http://195.250.25.25:8000",
-]
 
 CORS_EXPOSE_HEADERS = [
     'content-type',
     'authorization',
 ]
 
-# Para desarrollo, puedes permitir todos los orígenes (solo en DEBUG=True)
-if DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
-CORS_ORIGINS_WHITELIST = [
-    "http://localhost:3000",  # React/Vue/Angular en desarrollo
-    "http://195.250.25.25.23",  # Dominio en producción
-    "http://195.250.25.25:1337",
-    "https://altasfundacionaladina.org",
-    "http://195.250.25.25:3000",
-    "http://195.250.25.25:3000",
-    "http://195.250.25.25:8000",
-]
+
+
+
 
 MIDDLEWARE = [
    'corsheaders.middleware.CorsMiddleware',
@@ -198,6 +178,8 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
+
+
 DATABASES = {
    'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -208,7 +190,6 @@ DATABASES = {
         'PORT': '5432',        # Reemplaza con el puerto de tu servidor PostgreSQL (el puerto por defecto es 5432)
     }
 }
-
 
 
 # Password validation
