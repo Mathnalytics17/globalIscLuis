@@ -6,12 +6,17 @@ from datetime import timedelta  # Añade esta importación al inicio de tu archi
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
 get_env = os.getenv
 
+
+
+# Configuración para archivos multimedia
+MEDIA_URL = 'media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'apps', 'media')  # ✅ Mejor usar múltiples parámetros
 
 
  # Starting the gspread client when our server starts speeds things up; it avoids re-authenticating on each request
@@ -33,6 +38,10 @@ DEBUG = False
 
 ALLOWED_HOSTS = ['*']
 
+# Asegúrate de tener esta configuración para servir archivos en desarrollo
+if DEBUG:
+    from django.conf.urls.static import static
+    urlpatterns += static(MEDIA_URL, document_root=MEDIA_ROOT)
 
 # Application definition
 
@@ -58,31 +67,29 @@ SESSION_COOKIE_SAMESITE = 'None'  # Necesario para cross-site cookies
 SESSION_COOKIE_SECURE = True  # Solo enviar cookies sobre HTTPS (en producción)
 CSRF_COOKIE_SAMESITE = 'None'
 CSRF_COOKIE_SECURE = True
-FRONTEND_URL='http://195.250.25.25:3000/'
+FRONTEND_URL='http://localhost:3000/'
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
-    'authorization',
+    'authorization',  # ← IMPORTANTE para JWT
     'content-type',
     'dnt',
     'origin',
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'access-control-allow-origin',
 ]
 
 ROOT_URLCONF = 'backend.urls'
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # React/Vue/Angular en desarrollo
-    "http://195.250.25.25",  # Dominio en producción
-    "http://195.250.25.25:1337",
-    "https://www.altasfundacionaladina.org",
-    "https://altasfundacionaladina.org",
-    "http://195.250.25.25.23:3000",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000", 
+    "http://195.250.25.25",
     "http://195.250.25.25:3000",
     "http://195.250.25.25:8000",
-      "http://127.0.0.1:3000",
-    
+    "https://www.altasfundacionaladina.org",
+    "https://altasfundacionaladina.org",
 ]
 
 
@@ -97,7 +104,14 @@ CORS_TRUSTED_ORIGINS = [
     "http://195.250.25.25:8000",
 ]
 
+CORS_EXPOSE_HEADERS = [
+    'content-type',
+    'authorization',
+]
 
+# Para desarrollo, puedes permitir todos los orígenes (solo en DEBUG=True)
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
 CORS_ORIGINS_WHITELIST = [
     "http://localhost:3000",  # React/Vue/Angular en desarrollo
     "http://195.250.25.25.23",  # Dominio en producción
@@ -129,23 +143,42 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     )
 }
+# settings.py - ACTUALIZA la sección SIMPLE_JWT
 SIMPLE_JWT = {
-    'ROTATE_REFRESH_TOKENS': True,
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=10000),  # Más seguro
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=24),  # ← FALTABA ESTO
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,  # ← IMPORTANTE: Genera nuevo refresh token
+    'BLACKLIST_AFTER_ROTATION': True,  # ← Invalida el refresh token anterior
     'UPDATE_LAST_LOGIN': True,
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
+    'VERIFYING_KEY': None,
+    'AUDIENCE': None,
+    'ISSUER': None,
+    'JWK_URL': None,
+    'LEEWAY': 0,
     'AUTH_HEADER_TYPES': ('Bearer',),
+    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+    'USER_AUTHENTICATION_RULE': 'rest_framework_simplejwt.authentication.default_user_authentication_rule',
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+    'TOKEN_TYPE_CLAIM': 'token_type',
+    'TOKEN_USER_CLASS': 'rest_framework_simplejwt.models.TokenUser',
+    'JTI_CLAIM': 'jti',
+    'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
+    'SLIDING_TOKEN_LIFETIME': timedelta(hours=24),
+    'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=7),
 }
 
-
 ROOT_URLCONF = 'backend.urls'
-
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [
+            os.path.join(BASE_DIR, 'apps', 'media', 'templates'),  # Tu ruta
+            os.path.join(BASE_DIR, 'templates'),
+        ],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -167,10 +200,10 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
    'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'backend',  # Reemplaza con el nombre de tu base de datos
-        'USER': 'postgresuser',     # Reemplaza con tu nombre de usuario de PostgreSQL
-        'PASSWORD':'postgrespassword',  # Reemplaza con tu contraseña de PostgreSQL
-        'HOST': 'db',  # Reemplaza con la dirección de tu servidor PostgreSQL (puede ser 'localhost' o una IP)
+        'NAME': 'globaliscdb',  # Reemplaza con el nombre de tu base de datos
+        'USER': 'postgres',     # Reemplaza con tu nombre de usuario de PostgreSQL
+        'PASSWORD':'1',  # Reemplaza con tu contraseña de PostgreSQL
+        'HOST': 'localhost',  # Reemplaza con la dirección de tu servidor PostgreSQL (puede ser 'localhost' o una IP)
         'PORT': '5432',        # Reemplaza con el puerto de tu servidor PostgreSQL (el puerto por defecto es 5432)
     }
 }
@@ -205,12 +238,6 @@ AUTH_PASSWORD_VALIDATORS = [
 # Custom User Model
 AUTH_USER_MODEL = 'users.User'
 
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
-    'ROTATE_REFRESH_TOKENS': False,
-    'BLACKLIST_AFTER_ROTATION': True,
-}
 
 # Configuración de tokens
 EMAIL_VERIFICATION_TOKEN_EXPIRY_DAYS = 3  # Días de validez para verificación de email

@@ -1,0 +1,194 @@
+[
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 1,
+    "fields": {
+      "simbolo": "Ag",
+      "nombre": "Plata"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 2,
+    "fields": {
+      "simbolo": "Al",
+      "nombre": "Aluminio"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 3,
+    "fields": {
+      "simbolo": "B",
+      "nombre": "Boro"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 4,
+    "fields": {
+      "simbolo": "Ba",
+      "nombre": "Bario"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 5,
+    "fields": {
+      "simbolo": "Ca",
+      "nombre": "Calcio"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 6,
+    "fields": {
+      "simbolo": "Cd",
+      "nombre": "Cadmio"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 7,
+    "fields": {
+      "simbolo": "Cr",
+      "nombre": "Cromo"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 8,
+    "fields": {
+      "simbolo": "Cu",
+      "nombre": "Cobre"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 9,
+    "fields": {
+      "simbolo": "Fe",
+      "nombre": "Hierro"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 10,
+    "fields": {
+      "simbolo": "K",
+      "nombre": "Potasio"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 11,
+    "fields": {
+      "simbolo": "Li",
+      "nombre": "Litio"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 12,
+    "fields": {
+      "simbolo": "Mg",
+      "nombre": "Magnesio"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 13,
+    "fields": {
+      "simbolo": "Mn",
+      "nombre": "Manganeso"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 14,
+    "fields": {
+      "simbolo": "Mo",
+      "nombre": "Molibdeno"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 15,
+    "fields": {
+      "simbolo": "Na",
+      "nombre": "Sodio"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 16,
+    "fields": {
+      "simbolo": "Ni",
+      "nombre": "Níquel"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 17,
+    "fields": {
+      "simbolo": "P",
+      "nombre": "Fósforo"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 18,
+    "fields": {
+      "simbolo": "Pb",
+      "nombre": "Plomo"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 19,
+    "fields": {
+      "simbolo": "Sb",
+      "nombre": "Antimonio"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 20,
+    "fields": {
+      "simbolo": "Si",
+      "nombre": "Silicio"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 21,
+    "fields": {
+      "simbolo": "Sn",
+      "nombre": "Estaño"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 22,
+    "fields": {
+      "simbolo": "Ti",
+      "nombre": "Titanio"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 23,
+    "fields": {
+      "simbolo": "V",
+      "nombre": "Vanadio"
+    }
+  },
+  {
+    "model": "misc.elementoanalisis",
+    "pk": 24,
+    "fields": {
+      "simbolo": "Zn",
+      "nombre": "Zinc"
+    }
+  }
+]

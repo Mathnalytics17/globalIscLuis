@@ -19,6 +19,17 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions
 
 
+
+
+
+
+
+
+
+
+
+
+
     
 class FolderViewSet(viewsets.ModelViewSet):
     """
@@ -26,68 +37,42 @@ class FolderViewSet(viewsets.ModelViewSet):
     """
     queryset = Carpeta.objects.all()
     serializer_class = CarpetaSerializer
-    filter_backends = [DjangoFilterBackend]  # Habilitar filtros
-    filterset_fields = ['compania_id', 'typeFolder']  # Campos por los que se puede filtrar
-    permission_classes = [AllowAny]  # Acceso público sin autenticación
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['compania_id', 'typeFolder']
+    permission_classes = [AllowAny]
+
     def get_queryset(self):
-        # Obtener los parámetros de la URL
         compañia_id = self.request.query_params.get('compania_id')
         typeFolder = self.request.query_params.get('typeFolder')
+        nombre = self.request.query_params.get('nombre')
 
-        # Filtrar el queryset según los parámetros
         queryset = Carpeta.objects.all()
         if compañia_id:
             queryset = queryset.filter(compania_id=compañia_id)
         if typeFolder:
             queryset = queryset.filter(typeFolder=typeFolder)
+        if nombre:
+            queryset = queryset.filter(nombre=nombre)
 
         return queryset
 
-    def destroy(self, request, *args, **kwargs):
+    def create(self, request, *args, **kwargs):
         """
-        Sobrescribe el método DELETE para eliminar una carpeta.
+        Sobrescribe el método POST para mejor manejo de errores
         """
-        instance = self.get_object()  # Obtener la instancia a eliminar
-        self.perform_destroy(instance)  # Eliminar la instancia
-        return Response(status=status.HTTP_204_NO_CONTENT)  # Respuesta exitosa sin contenido
-
-    def update(self, request, *args, **kwargs):
-        """
-        Sobrescribe el método PUT para actualizar una carpeta.
-        """
-        instance = self.get_object()  # Obtener la instancia a actualizar
-        serializer = self.get_serializer(instance, data=request.data, partial=False)  # No permitir actualización parcial
-        serializer.is_valid(raise_exception=True)  # Validar los datos
-        self.perform_update(serializer)  # Actualizar la instancia
-
-        return Response(serializer.data)  # Devolver los datos actualizados
-
-    def partial_update(self, request, *args, **kwargs):
-        """
-        Sobrescribe el método PATCH para actualizar parcialmente una carpeta.
-        """
-        instance = self.get_object()  # Obtener la instancia a actualizar
-        serializer = self.get_serializer(instance, data=request.data, partial=True)  # Permitir actualización parcial
-        serializer.is_valid(raise_exception=True)  # Validar los datos
-        self.perform_update(serializer)  # Actualizar la instancia
-
-        return Response(serializer.data)  # Devolver los datos actualizados
-
-    def perform_destroy(self, instance):
-        """
-        Lógica adicional antes de eliminar una carpeta.
-        """
-        # Ejemplo: Registrar la eliminación en un log
-        print(f"Eliminando la carpeta: {instance.nombre}")
-        super().perform_destroy(instance)  # Llamar al método original
-
-    def perform_update(self, serializer):
-        """
-        Lógica adicional antes de actualizar una carpeta.
-        """
-        # Ejemplo: Registrar la actualización en un log
-        print(f"Actualizando la carpeta: {serializer.instance.nombre}")
-        super().perform_update(serializer)  # Llamar al método original
+        try:
+            print("Datos recibidos para crear carpeta:", request.data)
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            headers = self.get_success_headers(serializer.data)
+            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        except Exception as e:
+            print(f"Error en create: {e}")
+            return Response(
+                {"error": str(e), "detail": "Error al crear la carpeta"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 class AnalisisLubricanteViewSet(viewsets.ModelViewSet):
     """
@@ -103,6 +88,8 @@ class ResultadoMuestrasAceiteViewSet(viewsets.ModelViewSet):
     """
     queryset = ResultadoMuestrasAceite.objects.all()
     serializer_class = ResultadoMuestrasAceiteSerializer
+
+
 
 
 
@@ -156,3 +143,8 @@ class MaquinaViewSet(viewsets.ModelViewSet):
         maquina = self.get_object()
         maquina.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+
+
+

@@ -4,7 +4,7 @@ from apps.misc.api.models.roles.index import Rol
 from apps.misc.api.models.lubricante.index import Lubricante
 from apps.misc.api.models.tipoEquipo.index import ReferenciaEquipo, TipoEquipo
 from apps.misc.api.models.pruebas.index import Prueba
-from apps.misc.api.models.limitesyaux.index import LimiteCalidad, LimiteElemento, LimiteViscosidad, CategoriaLimite
+from apps.misc.api.models.limitesyaux.index import LimiteCalidad, LimiteViscosidad,TiposViscosidad
 from apps.misc.api.models.more.index import Calidad,Color,ColorGrasa,Jabon,Marca,MarcaGrasa,NLGI,ComentarioPredefinido
 # Configuración para Empresa
 @admin.register(Empresa)
@@ -36,10 +36,7 @@ class PruebaAdmin(admin.ModelAdmin):
     pass
 
 
-# Configuración para CategoriaLimite
-@admin.register(CategoriaLimite)
-class CategoriaLimiteAdmin(admin.ModelAdmin):
-    pass
+
 
 # Configuración para LimiteElemento
 @admin.register(Calidad)
@@ -71,4 +68,15 @@ class MarcaAdmin(admin.ModelAdmin):
 
 @admin.register(ComentarioPredefinido)
 class ComentarioPredefinidoAdmin(admin.ModelAdmin):
+    pass
+
+@admin.register(TiposViscosidad)
+class TiposViscosidadAdmin(admin.ModelAdmin):
+    pass
+@admin.register(LimiteViscosidad)
+class TLimiteViscosidadAdmin(admin.ModelAdmin):
+    pass
+
+@admin.register(LimiteCalidad)
+class LimiteCalidadAdmin(admin.ModelAdmin):
     pass

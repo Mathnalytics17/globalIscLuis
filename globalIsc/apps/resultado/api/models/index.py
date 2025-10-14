@@ -15,7 +15,7 @@ class Resultado(models.Model):
     
     prueba_muestra = models.ForeignKey(PruebaMuestra, on_delete=models.CASCADE, related_name='resultados')
    
-    resultado = models.FloatField()
+    resultado = models.TextField()
     fecha_medicion = models.DateTimeField()
     usuario_medicion = models.ForeignKey(User, on_delete=models.PROTECT, related_name='resultados_medidos')
     estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default='pendiente')

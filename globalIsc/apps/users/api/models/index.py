@@ -8,7 +8,7 @@ import uuid
     
 from django.db import models
 from django.contrib.auth import get_user_model
-
+from apps.misc.api.models.companies.index import Empresa
 class CustomUserManager(BaseUserManager):
     """Define a model manager for User model with no username field."""
 
@@ -66,7 +66,7 @@ class User(AbstractUser):
     last_name = models.CharField(max_length=30, blank=True)
     date_joined = models.DateTimeField(auto_now_add=True)
     last_login = models.DateTimeField(null=True, blank=True)
-    
+    empresa=models.ForeignKey(Empresa,default="1",on_delete=models.CASCADE)
     
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []

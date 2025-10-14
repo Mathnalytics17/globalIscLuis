@@ -40,15 +40,52 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
+from rest_framework_simplejwt.exceptions import AuthenticationFailed
+from django.contrib.auth import authenticate
+from rest_framework import serializers, status
+from rest_framework.response import Response
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.views import TokenObtainPairView
+
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
-        data = super().validate(attrs)
+        email = attrs.get('email')
+        password = attrs.get('password')
         
-        if not self.user.is_active:
-            raise serializers.ValidationError("User account is not active.")
+        # Validar que el email y contraseña estén presentes
+        if not email or not password:
+            raise serializers.ValidationError({
+                "error": True,
+                "message": "Email y contraseña son requeridos"
+            })
+        
+        # Autenticar al usuario manualmente para tener mejor control
+        user = authenticate(
+            request=self.context.get('request'),
+            username=email,
+            password=password
+        )
+        
+        if not user:
+            raise serializers.ValidationError({
+                "error": True,
+                "message": "Credenciales inválidas. Verifique su email y contraseña."
+            })
+        
+        if not user.is_active:
+            raise serializers.ValidationError({
+                "error": True,
+                "message": "Cuenta de usuario inactiva."
+            })
             
-        if not self.user.email_verified:
-            raise serializers.ValidationError("Email not verified.")
+        if not user.email_verified:
+            raise serializers.ValidationError({
+                "error": True,
+                "message": "Email no verificado. Por favor verifique su email."
+            })
+        
+        # Si todo está bien, proceder con la generación del token
+        data = super().validate(attrs)
         
         # Add custom claims
         refresh = self.get_token(self.user)
@@ -92,19 +129,31 @@ class LoginAV(TokenObtainPairView):
         try:
             serializer.is_valid(raise_exception=True)
         except serializers.ValidationError as e:
+            # Capturar errores de validación del serializador
+            error_message = e.detail
+            if isinstance(error_message, dict) and 'message' in error_message:
+                message = error_message['message']
+            else:
+                message = "Credenciales inválidas"
+                
             return Response(
-                {"error": True, "message": str(e)},
+                {"error": True, "message": message},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        except AuthenticationFailed as e:
+            return Response(
+                {"error": True, "message": "Credenciales inválidas"},
                 status=status.HTTP_401_UNAUTHORIZED
             )
         except Exception as e:
+            # Log the actual error for debugging
+            print(f"Login error: {str(e)}")
             return Response(
-                {"error": True, "message": "Error en el servidor"},
+                {"error": True, "message": "Error interno del servidor"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
             
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
-
-
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -137,7 +186,7 @@ class UserRegistrationView(generics.CreateAPIView):
                 expires_at=expires_at
             )
             
-            verification_url = f"{settings.FRONTEND_URL}areaPrivada/users/confirmUser?token={token.token}"
+            verification_url = f"{settings.FRONTEND_URL}users/confirmUser?token={token.token}"
             subject = "Verifica tu correo electrónico"
             message = f"""
             Hola {user.get_full_name() or user.email},
@@ -254,7 +303,7 @@ class EmailVerificationView(generics.GenericAPIView):
                 )
                 
             user.email_verified = True
-            user.is_active = True
+            #user.is_active = True
             user.save()
             token.delete()
             

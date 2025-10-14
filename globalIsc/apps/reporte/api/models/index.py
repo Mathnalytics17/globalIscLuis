@@ -47,10 +47,13 @@ class Reporte(models.Model):
     usuario_emision = models.ForeignKey(User, on_delete=models.PROTECT, related_name='reportes_emitidos')
     usuario_aprobacion = models.ForeignKey(User, on_delete=models.PROTECT, related_name='reportes_aprobados', blank=True, null=True)
     fecha_aprobacion = models.DateTimeField(blank=True, null=True)
-    observaciones = models.TextField(blank=True, null=True)
+    comentarios = models.TextField(blank=True, null=True)
+    conclusiones=models.TextField(blank=True,null=True)
     ruta_archivo = models.CharField(max_length=255, blank=True, null=True)
     estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default='borrador')
-    
+    firma_ruta=models.TextField(blank=True,null=True)
+    Responsable = models.CharField(max_length=255, blank=True, null=True)
+    with_limites=models.BooleanField(default=True)
     def __str__(self):
         return self.consecutivo
     

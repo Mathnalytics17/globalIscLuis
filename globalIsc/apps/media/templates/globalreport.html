@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Reporte de Análisis</title>
+</head>
+<body>
+
+<div>
+  <!-- Encabezado -->
+  <table border="1" width="100%">
+    <tr>
+      <td width="25%" align="center">
+        <img src="{{ reporte_info.logo_global }}" alt="Logo Global Oil" width="150"><br>
+        <p>NIT: 830135980-4</p>
+        <p>Parque Industrial Ciem Oikos de Occidente</p>
+        <p>Autopista Bogotá - Medellín</p>
+        <p>KM 2.5 Vía a Parcelas 900 Mts - Bodega K172</p>
+      </td>
+      <td width="35%" align="center">
+        <h2>ORDEN DE ANÁLISIS</h2>
+      </td>
+      <td width="15%" align="center">
+        <img src="{{ reporte_info.logo_report }}" alt="Icono" width="70">
+      </td>
+      <td width="25%" align="center">
+        <p><strong>Orden de Análisis N°:</strong> {{ consecutivo }}</p>
+        <p><strong>Fecha:</strong> {{ fecha_emision }}</p>
+      </td>
+    </tr>
+  </table>
+
+  <!-- Información de la muestra -->
+  <table border="1" width="100%" cellspacing="0" cellpadding="4">
+    <tr>
+      <td><strong>Fecha de Toma de Muestra:</strong></td>
+      <td>{{ muestra.fecha_toma }}</td>
+      <td><strong>Periodo de Servicio:</strong></td>
+      <td>{{ muestra.periodo_servicio_aceite }}</td>
+    </tr>
+    <tr>
+      <td><strong>Lubricante:</strong></td>
+      <td>{{ lubricante_info.nombre_comercial }}</td>
+      <td><strong>Equipo:</strong></td>
+      <td>{{ equipo_info.nombre }}</td>
+    </tr>
+    <tr>
+      <td><strong>Cliente:</strong></td>
+      <td>{{ empresa_info.nombre }}</td>
+      <td><strong>Placa:</strong></td>
+      <td>{{ muestra.equipo_placa }}</td>
+    </tr>
+    <tr>
+      <td><strong>Contacto:</strong></td>
+      <td>{{ muestra.contacto_cliente }}</td>
+      <td><strong>Periodo Servicio Equipo:</strong></td>
+      <td>{{ muestra.periodo_servicio_equipo }}</td>
+    </tr>
+  </table>
+
+  <!-- Resultados -->
+  <h3>Resultados de Análisis</h3>
+  <table border="1" width="100%" cellspacing="0" cellpadding="4">
+    <thead>
+      <tr>
+        <th>ANÁLISIS</th>
+        <th>MÉTODO</th>
+        <th>RESULTADO</th>
+        <th>UNIDADES</th>
+        <th>LÍMITES</th>
+        <th>COMENTARIO</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for prueba in pruebas_estructuradas %}
+      <tr>
+        <td>{{ prueba.prueba.nombre }}</td>
+        <td>{{ prueba.prueba.metodo_referencia|default:"-" }}</td>
+        <td>{{ prueba.valor|default:"-" }}</td>
+        <td>{{ prueba.prueba.unidad_medida|default:"-" }}</td>
+        <td>
+          {% if prueba.prueba.limites %}
+            {% if prueba.prueba.limites.tipo == 'generico' %}
+              {{ prueba.prueba.limites.symbol_operation }} {{ prueba.prueba.limites.valor }}
+            {% elif prueba.prueba.limites.tipo == 'calidad' %}
+              {% if prueba.prueba.limites.c1 %}{{ prueba.prueba.limites.c1 }}{% endif %}
+              {% if prueba.prueba.limites.c2 %}/{{ prueba.prueba.limites.c2 }}{% endif %}
+              {% if prueba.prueba.limites.valor %} - {{ prueba.prueba.limites.valor }}{% endif %}
+            {% elif prueba.prueba.limites.tipo == 'viscosidad' %}
+              {% if prueba.prueba.limites.vmin and prueba.prueba.limites.vmax %}
+                {{ prueba.prueba.limites.vmin }} - {{ prueba.prueba.limites.vmax }}
+              {% elif prueba.prueba.limites.v1 %}
+                {{ prueba.prueba.limites.v1 }}
+              {% endif %}
+            {% elif prueba.prueba.limites.tipo == 'elemento_analisis' %}
+              {{ prueba.prueba.limites.symbol_operation }} {{ prueba.prueba.limites.valor }}
+            {% else %}
+              {{ prueba.prueba.limites.tipo }}
+            {% endif %}
+          {% else %}
+            -
+          {% endif %}
+        </td>
+        <td>{{ prueba.estado_evaluado }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+<!-- Comentarios -->
+  <h3 style="margin-top: 15px;">Comentarios</h3>
+  <div style="border:1px solid black; min-height:80px; padding:8px;">
+    {{ observaciones|default:"No hay comentarios registrados" }}
+  </div>
+
+  <!-- Conclusiones y Firma -->
+  <table width="100%" cellspacing="0" cellpadding="8" style="margin-top:15px;">
+    <tr>
+      <td width="50%" valign="top">
+        <h3>Conclusiones</h3>
+        <div style="border:1px solid black; min-height:100px; padding:8px;">
+          {{ conclusiones|default:"No hay conclusiones registradas" }}
+        </div>
+      </td>
+      <tr>
+                <td align="center">
+                  <table border="1" width="90%" cellpadding="10" cellspacing="0" height="120">
+                    <tr>
+                      <td align="center" valign="top">
+                        {% if reporte_info.firma_ruta %}
+                          <!-- Información del responsable -->
+                          <table width="100%" cellpadding="2" cellspacing="0">
+                            <tr>
+                              <td align="center">
+                                <b>RESPONSABLE</b><br>
+                                <font size="3"><b>{{ responsable }}</b></font><br>
+                                <b>Global Oil</b>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td align="center" style="padding-top:10px;">
+                                <img src="{{ reporte_info.firma_ruta }}" alt="Firma" height="50"><br>
+                                <font size="1">Firma digital</font>
+                              </td>
+                            </tr>
+                          </table>
+                        {% else %}
+                          <!-- Espacio para firma manual -->
+                          <table width="100%" cellpadding="2" cellspacing="0">
+                            <tr>
+                              <td align="center">
+                                <b>RESPONSABLE</b><br>
+                                <font size="3"><b>{{ responsable }}</b></font><br>
+                                <b>Global Oil</b>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td align="center" style="padding-top:30px;">
+                                <table width="80%" cellpadding="0" cellspacing="0">
+                                  <tr>
+                                    <td style="border-top:1px solid black; padding-top:20px;">
+                                      <font size="1">Firma</font>
+                                    </td>
+                                  </tr>
+                                </table>
+                              </td>
+                            </tr>
+                          </table>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+    </tr>
+</div>
+
+</body>
+</html>

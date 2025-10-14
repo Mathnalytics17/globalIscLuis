@@ -5,6 +5,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core import exceptions
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.users.api.models.index  import EmailVerificationToken, PasswordResetToken
+from apps.misc.api.models.companies.index import Empresa
 import uuid
 from datetime import datetime, timedelta
 from django.conf import settings
@@ -25,7 +26,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['email', 'password', 'password2', 'first_name', 'last_name', 'phone','role']
+        fields = ['email', 'password', 'password2', 'first_name', 'last_name', 'phone']
         extra_kwargs = {
             'password': {'write_only': True},
             'password2': {'write_only': True},
@@ -69,16 +70,30 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return data
 
 class UserSerializer(serializers.ModelSerializer):
+    empresa = serializers.StringRelatedField(read_only=True)  # Solo el string representation
+    
     class Meta:
         model = User
-        fields = ['id', 'email', 'first_name', 'last_name', 'role', 'phone', 'is_active', 'email_verified']
-        read_only_fields = ['id', 'email', 'is_active', 'email_verified']
+        fields = ['id', 'email', 'first_name', 'last_name', 'role', 'phone', 'is_active', 'email_verified', 'empresa']
+        read_only_fields = ['id', 'email', 'is_active', 'email_verified', 'empresa']
 
+
+# En tu serializers.py
 class UserDetailSerializer(serializers.ModelSerializer):
+    empresa = serializers.StringRelatedField(read_only=True)  # Solo lectura para mostrar
+    empresa_id = serializers.PrimaryKeyRelatedField(
+        queryset=Empresa.objects.all(), 
+        source='empresa', 
+        write_only=True,
+        required=False,
+        allow_null=True
+    )
+    
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 
-                 'is_active', 'role', 'email_verified', 'date_joined']
+                 'is_active', 'role', 'email_verified', 'date_joined', 
+                 'empresa', 'empresa_id', 'phone']
         extra_kwargs = {
             'password': {'write_only': True},
             'date_joined': {'read_only': True}
@@ -88,7 +103,6 @@ class UserDetailSerializer(serializers.ModelSerializer):
         # Evitar que se actualice el username
         validated_data.pop('username', None)
         return super().update(instance, validated_data)
-    
     
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(required=True)
@@ -147,7 +161,7 @@ class PasswordResetRequestSerializer(serializers.Serializer):
                 user=user,
                 expires_at=expires_at
             )
-            reset_url = f"{settings.FRONTEND_URL}/areaPrivada/users/resetPassword?token={token.token}"
+            reset_url = f"{settings.FRONTEND_URL}users/resetPassword?token={token.token}"
            
             subject = "Cambia tu password"
             message = f"""
@@ -192,10 +206,3 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             
         return data
 
-
-class UserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ['id', 'email', 'first_name', 'last_name', 'role', 'is_active', 'email_verified']
-        read_only_fields = ['id', 'email', 'role', 'is_active', 'email_verified']
-        
