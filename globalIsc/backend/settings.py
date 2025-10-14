@@ -84,12 +84,13 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
     'access-control-allow-origin',
 ]
+# CORREGIDO:
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000", 
     "http://195.250.25.25:3000",
+    "http://195.250.25.25:8000",  # ← AÑADIR ESTE
 ]
-
 CORS_ALLOW_CREDENTIALS = True
 CORS_EXPOSE_HEADERS = ['content-type', 'authorization']
 
