@@ -61,6 +61,7 @@ INSTALLED_APPS = [
 ]
 
 
+
 CORS_ALLOW_CREDENTIALS = True  # Permite el envío de credenciales (cookies, auth headers)
 
 SESSION_COOKIE_SAMESITE = 'None'  # Necesario para cross-site cookies
@@ -200,14 +201,13 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
    'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'globaliscdb',  # Reemplaza con el nombre de tu base de datos
-        'USER': 'postgres',     # Reemplaza con tu nombre de usuario de PostgreSQL
-        'PASSWORD':'1',  # Reemplaza con tu contraseña de PostgreSQL
-        'HOST': 'localhost',  # Reemplaza con la dirección de tu servidor PostgreSQL (puede ser 'localhost' o una IP)
+        'NAME': 'backend',  # Reemplaza con el nombre de tu base de datos
+        'USER': 'postgresuser',     # Reemplaza con tu nombre de usuario de PostgreSQL
+        'PASSWORD':'postgrespassword',  # Reemplaza con tu contraseña de PostgreSQL
+        'HOST': 'db',  # Reemplaza con la dirección de tu servidor PostgreSQL (puede ser 'localhost' o una IP)
         'PORT': '5432',        # Reemplaza con el puerto de tu servidor PostgreSQL (el puerto por defecto es 5432)
     }
 }
-
 
 
 
