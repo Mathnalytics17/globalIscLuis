@@ -19,17 +19,7 @@ services:
   web:
     build: ./globalIsc
     container_name: backend
-    command: >
-      sh -c "python manage.py migrate &&
-            gunicorn backend.wsgi:application
-            --bind 0.0.0.0:8000
-            --workers 2
-            --threads 2
-            --timeout 120
-            --access-logfile -
-            --error-logfile -
-            --log-level debug
-            --capture-output"
+    command: python manage.py runserver
     volumes:
       - ./globalIsc:/usr/src/backend
     env_file:
