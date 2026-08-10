@@ -1,17 +1,11 @@
 #!/bin/sh
 
-if [ "$DATABASE" = "postgres" ] 
-then
-    echo "Check if database is running..."
+set -e
 
-    while ! nc -z $SQL_HOST $SQL_PORT; do
-        sleep 0.1
-    done
-
-    echo "The database is up and running :-D"
+if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
+    echo "Applying committed database migrations..."
+    python manage.py migrate --noinput
+    python manage.py collectstatic --noinput
 fi
-
-python manage.py makemigrations
-python manage.py migrate
 
 exec "$@"
