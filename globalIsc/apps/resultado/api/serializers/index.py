@@ -1,5 +1,4 @@
 from rest_framework import serializers
-from apps.misc.api.serializers.pruebas.index import PruebaSerializer
 from apps.muestras.api.serializers.pruebasMuestra.index import PruebaMuestraSerializer
 from apps.users.api.serializers.index import UserSerializer
 from apps.resultado.api.models.index import Resultado, HistoricoResultado, RevisionResultado

@@ -1,3 +1,15 @@
-from django.db import models
+"""Django model exports for the asset-tree bounded context."""
 
-# Create your models here.
+from apps.activesTree.api.models.machines.index import Maquina
+from apps.activesTree.api.models.index import (
+    AsignacionPuntoMuestreo,
+    Carpeta,
+    PuntoMuestreo,
+)
+
+__all__ = [
+    "AsignacionPuntoMuestreo",
+    "Carpeta",
+    "Maquina",
+    "PuntoMuestreo",
+]

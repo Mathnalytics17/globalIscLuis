@@ -1,3 +1,9 @@
-from django.db import models
+"""Django model exports for the laboratory-results bounded context."""
 
-# Create your models here.
+from apps.resultado.api.models.index import (
+    HistoricoResultado,
+    Resultado,
+    RevisionResultado,
+)
+
+__all__ = ["HistoricoResultado", "Resultado", "RevisionResultado"]

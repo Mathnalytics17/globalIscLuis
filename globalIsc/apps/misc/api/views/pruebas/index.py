@@ -1,63 +1,94 @@
 from rest_framework import viewsets, status
-from rest_framework.response import Response
 from rest_framework.decorators import action
-from django.shortcuts import get_object_or_404
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from apps.utils.pagination import StandardResultsSetPagination
+from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
+
 from apps.misc.api.models.pruebas.index import Prueba
-from apps.misc.api.serializers.pruebas.index import PruebaSerializer
-from django.utils import timezone
-from apps.misc.api.serializers.limitesyaux.index import AsignarLimiteSerializer,PruebaLimiteSerializer
-from apps.misc.api.models.limitesyaux.index import PruebaLimite
+from apps.misc.api.serializers.pruebas.index import (
+    PruebaListSerializer,
+    PruebaDetailSerializer,
+    PruebaCreateUpdateSerializer,
+)
 
-from django.contrib.contenttypes.models import ContentType
 
-class PruebaViewSet(viewsets.ModelViewSet):
+class PruebaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
+    pagination_class = StandardResultsSetPagination
     queryset = Prueba.objects.all()
-    serializer_class = PruebaSerializer
-    
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        categoria = self.request.query_params.get('categoria', None)
-        
-        if categoria:
-            queryset = queryset.filter(categoria=categoria)
-        return queryset
+    permission_classes = [IsAuthenticated, DenyReadOnlyWrite, HasSecurityPermission]
+    permission_action_map = {
+        "list": "pruebas.ver",
+        "retrieve": "pruebas.ver",
+        "create": "pruebas.crear",
+        "update": "pruebas.editar",
+        "partial_update": "pruebas.editar",
+        "destroy": "pruebas.eliminar",
+        "restore": "pruebas.restaurar",
+    }
 
-    @action(detail=True, methods=['post'])
-    def asignar_limite(self, request, pk=None):
-        prueba = self.get_object()
-        serializer = AsignarLimiteSerializer(data=request.data)
-        
-        if serializer.is_valid():
-            content_type_id = serializer.validated_data['content_type_id']
-            object_id = serializer.validated_data['object_id']
-            
-            # Verificar si ya existe un límite para esta prueba
-            if PruebaLimite.objects.filter(prueba=prueba).exists():
-                return Response(
-                    {'error': 'Esta prueba ya tiene un límite asignado'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Crear la relación
-            prueba_limite = PruebaLimite.objects.create(
-                prueba=prueba,
-                content_type_id=content_type_id,
-                object_id=object_id
+    def get_queryset(self):
+        queryset = (
+            Prueba.objects.all()
+            .select_related("metodo", "metodo__equipo_prueba", "unidad_catalogo", "condicion_catalogo", "condicion_catalogo__unidad")
+            .prefetch_related(
+                "resultados",
+                "resultados__unidad_catalogo",
+                "resultados__divisiones",
+                "resultados__divisiones__componentes",
+                "resultados__divisiones__separadores",
+                "resultados__divisiones__disposiciones",
+                "resultados__divisiones__disposiciones__items",
             )
-            
+            .order_by("-id")
+        )
+
+        # Para restaurar necesitamos poder encontrar pruebas inactivas
+        if self.action == "restore":
+            return queryset
+
+        include_inactive = self.request.query_params.get("include_inactive")
+
+        if include_inactive in ["true", "1", "yes"]:
+            return queryset
+
+        return queryset.filter(activo=True)
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            include_structure = str(
+                self.request.query_params.get("include_structure", "")
+            ).strip().lower()
+            if include_structure in {"1", "true", "yes"}:
+                return PruebaDetailSerializer
+            return PruebaListSerializer
+
+        if self.action in ["create", "update", "partial_update"]:
+            return PruebaCreateUpdateSerializer
+
+        return PruebaDetailSerializer
+
+    def destroy(self, request, *args, **kwargs):
+        prueba = self.get_object()
+        prueba.activo = False
+        prueba.save(update_fields=["activo"])
+        return Response(
+            {"detail": "Prueba eliminada correctamente."},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        prueba = Prueba.objects.filter(pk=pk).first()
+
+        if not prueba:
             return Response(
-                PruebaLimiteSerializer(prueba_limite).data,
-                status=status.HTTP_201_CREATED
+                {"detail": "La prueba no existe."},
+                status=status.HTTP_404_NOT_FOUND,
             )
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    @action(detail=True, methods=['get'])
-    def limite_asignado(self, request, pk=None):
-        prueba = self.get_object()
-        try:
-            prueba_limite = prueba.limite_asignado
-            serializer = PruebaLimiteSerializer(prueba_limite)
-            return Response(serializer.data)
-        except PruebaLimite.DoesNotExist:
-            return Response({'detail': 'No hay límite asignado'}, status=404)
+
+        prueba.activo = True
+        prueba.save(update_fields=["activo"])
+
+        serializer = PruebaDetailSerializer(prueba, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)

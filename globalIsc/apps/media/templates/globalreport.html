@@ -2,180 +2,565 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Reporte de Análisis</title>
+<title>Orden de Análisis {{ consecutivo }}</title>
+<style>
+  @page {
+    size: 8.5in 11in;
+    margin: 0.48in 0.52in 0.42in 0.52in;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #fff;
+  }
+
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 9.8pt;
+    color: #000;
+  }
+
+  .report-page {
+    width: 7.46in;
+    max-width: 7.46in;
+    margin: 0 auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  td, th {
+    border: 0.8pt solid #000;
+    padding: 1.8px 2.8px;
+    vertical-align: middle;
+    line-height: 1.08;
+  }
+
+  .header {
+    margin-top: 0;
+    margin-bottom: 7px;
+  }
+
+  .header-logo-cell {
+    width: 31%;
+    text-align: center;
+  }
+
+  .header-title-cell {
+    width: 38%;
+    text-align: center;
+    font-size: 15pt;
+    font-weight: bold;
+    text-decoration: underline;
+  }
+
+  .header-icon-cell {
+    width: 13%;
+    text-align: center;
+  }
+
+  .header-order-cell {
+    width: 18%;
+    padding: 0;
+  }
+
+  .logo-global {
+    width: 132px;
+    height: auto;
+    display: block;
+    margin: 0 auto 2px auto;
+  }
+
+  .icon-report {
+    width: 48px;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+  }
+
+  .company-small {
+    font-size: 5.1pt;
+    line-height: 1.08;
+    text-align: center;
+  }
+
+  .order-mini-table td {
+    border-left: 0;
+    border-right: 0;
+    border-top: 0.8pt solid #000;
+    border-bottom: 0.8pt solid #000;
+    text-align: center;
+    font-size: 6.8pt;
+    padding: 1px 2px;
+    line-height: 1.05;
+  }
+
+  .order-mini-table tr:first-child td {
+    border-top: 0;
+    text-align: right;
+    font-weight: bold;
+    font-size: 6pt;
+  }
+
+  .order-mini-table tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .info {
+    margin-top: 0;
+    margin-bottom: 8px;
+  }
+
+  .info td {
+    font-size: 8.7pt;
+  }
+
+  .label {
+    font-weight: bold;
+  }
+
+  .section-title {
+    display: none;
+  }
+
+  .results {
+    table-layout: fixed;
+  }
+
+  .results th {
+    text-align: center;
+    font-size: 8.9pt;
+    font-weight: bold;
+    padding: 2px 2.6px;
+  }
+
+  .results td {
+    font-size: 8.2pt;
+    padding: 2px 2.5px;
+    line-height: 1.08;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+  }
+
+  .analysis-main {
+    width: 11%;
+    text-align: left;
+  }
+
+  .analysis-sub {
+    width: 13%;
+    text-align: left;
+  }
+
+  .method-col {
+    width: 8%;
+  }
+
+  .result-col {
+    width: 13%;
+  }
+
+  .unit-col {
+    width: 6%;
+  }
+
+  .limit-col {
+    width: 13%;
+    font-size: 6.9pt;
+  }
+
+  .comment-col {
+    width: 10%;
+    font-weight: bold;
+    font-size: 8.1pt;
+  }
+
+  .center {
+    text-align: center;
+  }
+
+  .right {
+    text-align: right;
+  }
+
+  .legend {
+    margin: 0 0 4px 0;
+  }
+
+  .legend td {
+    border: 0;
+    padding: 1px 5px;
+    font-size: 7.3pt;
+  }
+
+  .legend-swatch {
+    width: 10px;
+    border: 0.6pt solid #555 !important;
+  }
+
+  .field-mini,
+  .limit-mini {
+    width: 100%;
+    border: 0;
+  }
+
+  .field-mini td,
+  .limit-mini td {
+    border: 0;
+    border-bottom: 0.3pt solid #c8c8c8;
+    padding: 2px 3px;
+    font-size: 7.5pt;
+    line-height: 1.12;
+  }
+
+  .field-mini tr:last-child td,
+  .limit-mini tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .field-name {
+    font-weight: bold;
+  }
+
+  .result-layout {
+    line-height: 1.25;
+  }
+
+  .result-layout .field-value {
+    display: inline;
+    padding: 1px 2px;
+  }
+
+  .result-layout .separator {
+    padding: 0 2px;
+    font-weight: bold;
+  }
+
+  .result-layout .layout-break {
+    display: block;
+    height: 2px;
+  }
+
+  .band-label {
+    width: 12px;
+    text-align: center;
+    font-weight: bold;
+  }
+
+  .band-green,
+  .status-normal {
+    background: #d9ead3;
+    color: #215e2e;
+  }
+
+  .band-yellow,
+  .status-warning {
+    background: #fff2cc;
+    color: #8a5200;
+  }
+
+  .band-red,
+  .status-critical {
+    background: #f4cccc;
+    color: #8f1717;
+  }
+
+  .band-gray,
+  .status-neutral,
+  .status-pending {
+    background: #eeeeee;
+    color: #444;
+  }
+
+  .status-detail {
+    display: block;
+    margin-top: 2px;
+    font-size: 6.8pt;
+    font-weight: normal;
+  }
+
+  .comments-section {
+    page-break-inside: avoid;
+  }
+
+  .comments-title {
+    padding: 0 0 3px 0;
+    font-weight: bold;
+    font-size: 9.5pt;
+  }
+
+  .comments-block {
+    padding: 4px 8px 5px 8px;
+    min-height: 58px;
+    vertical-align: top;
+  }
+
+  .comments-list {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  .comments-list li {
+    margin: 0;
+    padding: 0 0 1px 1px;
+    line-height: 1.13;
+    font-size: 8.4pt;
+  }
+
+  .bottom {
+    margin-top: 0;
+    table-layout: fixed;
+  }
+
+  .bottom td {
+    vertical-align: top;
+    font-size: 8.4pt;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    -pdf-word-wrap: CJK;
+  }
+
+  .bottom-title {
+    font-weight: bold;
+    font-size: 9.5pt;
+    margin-bottom: 4px;
+  }
+
+  .conclusion-content {
+    line-height: 1.25;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    -pdf-word-wrap: CJK;
+  }
+
+  .responsible {
+    width: 34%;
+  }
+
+  .responsible-name {
+    margin-top: 2px;
+    font-size: 7.6pt;
+  }
+
+  .signature {
+    width: 112px;
+    max-height: 48px;
+    display: block;
+    margin: 3px auto 0;
+  }
+
+  .disclaimer td {
+    font-size: 5.8pt;
+    padding: 1.5px 3px;
+  }
+</style>
 </head>
+
 <body>
+<div class="report-page">
 
-<div>
-  <!-- Encabezado -->
-  <table border="1" width="100%">
+  <table class="header">
     <tr>
-      <td width="25%" align="center">
-        <img src="{{ reporte_info.logo_global }}" alt="Logo Global Oil" width="150"><br>
-        <p>NIT: 830135980-4</p>
-        <p>Parque Industrial Ciem Oikos de Occidente</p>
-        <p>Autopista Bogotá - Medellín</p>
-        <p>KM 2.5 Vía a Parcelas 900 Mts - Bodega K172</p>
+      <td class="header-logo-cell">
+        <img class="logo-global" src="./logo-globaloil.jpg">
+        <div class="company-small">
+          <strong>NIT: 830135980-4</strong><br>
+          Parque Industrial Ciem Oikos de Occidente<br>
+          Autopista Bogotá - Medellín<br>
+          KM 2.5 Vía a Parcelas 900 Mts - Bodega K172
+        </div>
       </td>
-      <td width="35%" align="center">
-        <h2>ORDEN DE ANÁLISIS</h2>
+      <td class="header-title-cell">
+        ORDEN DE ANÁLISIS
       </td>
-      <td width="15%" align="center">
-        <img src="{{ reporte_info.logo_report }}" alt="Icono" width="70">
+      <td class="header-icon-cell">
+        <img class="icon-report" src="./icon-report.png">
       </td>
-      <td width="25%" align="center">
-        <p><strong>Orden de Análisis N°:</strong> {{ consecutivo }}</p>
-        <p><strong>Fecha:</strong> {{ fecha_emision }}</p>
+      <td class="header-order-cell">
+        <table class="order-mini-table">
+          <tr><td>CCF-PI-F-003</td></tr>
+          <tr><td><strong>Orden de Análisis N°</strong></td></tr>
+          <tr><td>{{ consecutivo }}</td></tr>
+          <tr><td><strong>Fecha:</strong></td></tr>
+          <tr><td>{{ fecha_emision }}</td></tr>
+        </table>
       </td>
     </tr>
   </table>
 
-  <!-- Información de la muestra -->
-  <table border="1" width="100%" cellspacing="0" cellpadding="4">
+  <table class="info">
     <tr>
-      <td><strong>Fecha de Toma de Muestra:</strong></td>
-      <td>{{ muestra.fecha_toma }}</td>
-      <td><strong>Periodo de Servicio:</strong></td>
-      <td>{{ muestra.periodo_servicio_aceite }}</td>
+      <td class="label" style="width: 25%;">Fecha de Toma de Muestra:</td>
+      <td style="width: 25%;">{{ fecha_toma }}</td>
+      <td class="label" style="width: 25%;">Periodo de Servicio:</td>
+      <td style="width: 25%;">{{ muestra_info.periodo_servicio_aceite|default:"-" }}</td>
     </tr>
     <tr>
-      <td><strong>Lubricante:</strong></td>
-      <td>{{ lubricante_info.nombre_comercial }}</td>
-      <td><strong>Equipo:</strong></td>
-      <td>{{ equipo_info.nombre }}</td>
+      <td class="label">Lubricante:</td>
+      <td>{{ lubricante_info.nombre_comercial|default:"-" }}</td>
+      <td class="label">Equipo:</td>
+      <td>{{ equipo_info.nombre|default:"-" }}</td>
     </tr>
     <tr>
-      <td><strong>Cliente:</strong></td>
-      <td>{{ empresa_info.nombre }}</td>
-      <td><strong>Placa:</strong></td>
-      <td>{{ muestra.equipo_placa }}</td>
+      <td class="label">Cliente:</td>
+      <td>{{ empresa_info.nombre|default:"-" }}</td>
+      <td class="label">Placa:</td>
+      <td>{{ muestra_info.equipo_placa|default:"-" }}</td>
     </tr>
     <tr>
-      <td><strong>Contacto:</strong></td>
-      <td>{{ muestra.contacto_cliente }}</td>
-      <td><strong>Periodo Servicio Equipo:</strong></td>
-      <td>{{ muestra.periodo_servicio_equipo }}</td>
+      <td class="label">Contacto:</td>
+      <td>{{ muestra_info.contacto_cliente|default:"-" }}</td>
+      <td class="label">Periodo de Servicio Equipo:</td>
+      <td>{{ muestra_info.periodo_servicio_equipo|default:"-" }}</td>
     </tr>
   </table>
 
-  <!-- Resultados -->
-  <h3>Resultados de Análisis</h3>
-  <table border="1" width="100%" cellspacing="0" cellpadding="4">
+  <div class="section-title">Resultados de Análisis</div>
+
+  <table class="legend">
+    <tr>
+      <td class="legend-swatch band-green">&nbsp;</td><td>Aceptable</td>
+      <td class="legend-swatch band-yellow">&nbsp;</td><td>Alerta</td>
+      <td class="legend-swatch band-red">&nbsp;</td><td>Crítico</td>
+      <td class="legend-swatch band-gray">&nbsp;</td><td>Informativo / pendiente</td>
+    </tr>
+  </table>
+
+  <table class="results">
     <thead>
       <tr>
-        <th>ANÁLISIS</th>
-        <th>MÉTODO</th>
-        <th>RESULTADO</th>
-        <th>UNIDADES</th>
-        <th>LÍMITES</th>
-        <th>COMENTARIO</th>
+        <th colspan="2">ANÁLISIS</th>
+        <th class="method-col">MÉTODO</th>
+        <th class="result-col">RESULTADO</th>
+        <th class="unit-col">UNIDADES</th>
+        <th class="limit-col band-green">ACEPTABLE</th>
+        <th class="limit-col band-yellow">ALERTA</th>
+        <th class="limit-col band-red">CRÍTICO</th>
+        <th class="comment-col">ESTADO</th>
       </tr>
     </thead>
     <tbody>
-      {% for prueba in pruebas_estructuradas %}
-      <tr>
-        <td>{{ prueba.prueba.nombre }}</td>
-        <td>{{ prueba.prueba.metodo_referencia|default:"-" }}</td>
-        <td>{{ prueba.valor|default:"-" }}</td>
-        <td>{{ prueba.prueba.unidad_medida|default:"-" }}</td>
-        <td>
-          {% if prueba.prueba.limites %}
-            {% if prueba.prueba.limites.tipo == 'generico' %}
-              {{ prueba.prueba.limites.symbol_operation }} {{ prueba.prueba.limites.valor }}
-            {% elif prueba.prueba.limites.tipo == 'calidad' %}
-              {% if prueba.prueba.limites.c1 %}{{ prueba.prueba.limites.c1 }}{% endif %}
-              {% if prueba.prueba.limites.c2 %}/{{ prueba.prueba.limites.c2 }}{% endif %}
-              {% if prueba.prueba.limites.valor %} - {{ prueba.prueba.limites.valor }}{% endif %}
-            {% elif prueba.prueba.limites.tipo == 'viscosidad' %}
-              {% if prueba.prueba.limites.vmin and prueba.prueba.limites.vmax %}
-                {{ prueba.prueba.limites.vmin }} - {{ prueba.prueba.limites.vmax }}
-              {% elif prueba.prueba.limites.v1 %}
-                {{ prueba.prueba.limites.v1 }}
+      {% regroup pruebas_estructuradas by analisis as grupos_pruebas %}
+      {% for grupo in grupos_pruebas %}
+        {% if grupo.list|length > 1 %}
+          {% for row in grupo.list %}
+            <tr>
+              {% if forloop.first %}
+                <td class="analysis-main" rowspan="{{ grupo.list|length }}">{{ grupo.grouper }}</td>
               {% endif %}
-            {% elif prueba.prueba.limites.tipo == 'elemento_analisis' %}
-              {{ prueba.prueba.limites.symbol_operation }} {{ prueba.prueba.limites.valor }}
-            {% else %}
-              {{ prueba.prueba.limites.tipo }}
-            {% endif %}
-          {% else %}
-            -
-          {% endif %}
-        </td>
-        <td>{{ prueba.estado_evaluado }}</td>
-      </tr>
+              <td class="analysis-sub">{{ row.subanalisis|default:"-" }}</td>
+              {% if forloop.first %}
+                <td class="center method-col" rowspan="{{ grupo.list|length }}">{{ grupo.list.0.metodo|default:"-" }}</td>
+              {% endif %}
+              <td class="result-col">
+                {% if row.display_tokens %}
+                  <div class="result-layout">
+                    {% for token in row.display_tokens %}
+                      {% if token.type == "field" %}
+                        <span class="field-value status-{{ token.field.status_class }}">{{ token.field.resultado|default:"-" }}</span>
+                      {% elif token.type == "break" %}
+                        <span class="layout-break"></span>
+                      {% else %}
+                        <span class="separator">{{ token.value }}</span>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                {% else %}
+                  {{ row.resultado|default:"-" }}
+                {% endif %}
+              </td>
+              <td class="unit-col">{{ row.unidad|default:"-" }}</td>
+              <td class="limit-col">{{ row.limite_aceptable|default:row.limite|default:"-" }}</td>
+              <td class="limit-col">{{ row.limite_alerta|default:"-" }}</td>
+              <td class="limit-col">{{ row.limite_critico|default:"-" }}</td>
+              <td class="comment-col center status-{{ row.comentario_class }}">
+                {{ row.comentario|default:"PENDIENTE" }}
+                {% if row.comentario_detalle %}<span class="status-detail">{{ row.comentario_detalle }}</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          {% for prueba in grupo.list %}
+            <tr>
+              {% if prueba.subanalisis %}
+                <td class="analysis-main">{{ prueba.analisis }}</td>
+                <td class="analysis-sub">{{ prueba.subanalisis }}</td>
+              {% else %}
+                <td class="analysis-main" colspan="2">{{ prueba.analisis }}</td>
+              {% endif %}
+              <td class="center method-col">{{ prueba.metodo|default:"-" }}</td>
+              <td class="result-col">
+                {% if prueba.display_tokens %}
+                  <div class="result-layout">
+                    {% for token in prueba.display_tokens %}
+                      {% if token.type == "field" %}
+                        <span class="field-value status-{{ token.field.status_class }}">{{ token.field.resultado|default:"-" }}</span>
+                      {% elif token.type == "break" %}
+                        <span class="layout-break"></span>
+                      {% else %}
+                        <span class="separator">{{ token.value }}</span>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                {% else %}
+                  {{ prueba.resultado|default:"-" }}
+                {% endif %}
+              </td>
+              <td class="unit-col">{{ prueba.unidad|default:"-" }}</td>
+              <td class="limit-col">{{ prueba.limite_aceptable|default:prueba.limite|default:"-" }}</td>
+              <td class="limit-col">{{ prueba.limite_alerta|default:"-" }}</td>
+              <td class="limit-col">{{ prueba.limite_critico|default:"-" }}</td>
+              <td class="comment-col center status-{{ prueba.comentario_class }}">
+                {{ prueba.comentario|default:"PENDIENTE" }}
+                {% if prueba.comentario_detalle %}<span class="status-detail">{{ prueba.comentario_detalle }}</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        {% endif %}
       {% endfor %}
     </tbody>
   </table>
-<!-- Comentarios -->
-  <h3 style="margin-top: 15px;">Comentarios</h3>
-  <div style="border:1px solid black; min-height:80px; padding:8px;">
-    {{ observaciones|default:"No hay comentarios registrados" }}
-  </div>
 
-  <!-- Conclusiones y Firma -->
-  <table width="100%" cellspacing="0" cellpadding="8" style="margin-top:15px;">
+  <table class="comments-section">
     <tr>
-      <td width="50%" valign="top">
-        <h3>Conclusiones</h3>
-        <div style="border:1px solid black; min-height:100px; padding:8px;">
-          {{ conclusiones|default:"No hay conclusiones registradas" }}
-        </div>
+      <td class="comments-block">
+        <div class="comments-title">COMENTARIOS:</div>
+        <ol class="comments-list">
+          {% for comentario in comentarios_lista %}
+            <li>{{ comentario }}</li>
+          {% empty %}
+            <li>No hay comentarios registrados.</li>
+          {% endfor %}
+        </ol>
       </td>
-      <tr>
-                <td align="center">
-                  <table border="1" width="90%" cellpadding="10" cellspacing="0" height="120">
-                    <tr>
-                      <td align="center" valign="top">
-                        {% if reporte_info.firma_ruta %}
-                          <!-- Información del responsable -->
-                          <table width="100%" cellpadding="2" cellspacing="0">
-                            <tr>
-                              <td align="center">
-                                <b>RESPONSABLE</b><br>
-                                <font size="3"><b>{{ responsable }}</b></font><br>
-                                <b>Global Oil</b>
-                              </td>
-                            </tr>
-                            <tr>
-                              <td align="center" style="padding-top:10px;">
-                                <img src="{{ reporte_info.firma_ruta }}" alt="Firma" height="50"><br>
-                                <font size="1">Firma digital</font>
-                              </td>
-                            </tr>
-                          </table>
-                        {% else %}
-                          <!-- Espacio para firma manual -->
-                          <table width="100%" cellpadding="2" cellspacing="0">
-                            <tr>
-                              <td align="center">
-                                <b>RESPONSABLE</b><br>
-                                <font size="3"><b>{{ responsable }}</b></font><br>
-                                <b>Global Oil</b>
-                              </td>
-                            </tr>
-                            <tr>
-                              <td align="center" style="padding-top:30px;">
-                                <table width="80%" cellpadding="0" cellspacing="0">
-                                  <tr>
-                                    <td style="border-top:1px solid black; padding-top:20px;">
-                                      <font size="1">Firma</font>
-                                    </td>
-                                  </tr>
-                                </table>
-                              </td>
-                            </tr>
-                          </table>
-                        {% endif %}
-                      </td>
-                    </tr>
-                  </table>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
     </tr>
-</div>
+  </table>
 
+  <table class="bottom">
+    <tr>
+      <td style="width: 66%;">
+        <div class="bottom-title">CONCLUSIONES:</div>
+        <div class="conclusion-content">{{ conclusiones|linebreaksbr }}</div>
+      </td>
+      <td class="responsible">
+        <div class="bottom-title">RESPONSABLE:</div>
+        <div class="responsible-name">{{ responsable }}</div>
+        {% if reporte_info.firma_url %}
+          <img class="signature" src="{{ reporte_info.firma_url }}">
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <table class="disclaimer">
+    <tr>
+      <td>Las propiedades descritas en este reporte corresponden a las de la muestra suministrada.</td>
+    </tr>
+  </table>
+
+</div>
 </body>
 </html>
