@@ -20,6 +20,19 @@ def migrate_legacy_test_methods(apps, schema_editor):
     MetodoEquipo = apps.get_model("misc", "MetodoEquipo")
     EquipoPrueba = apps.get_model("misc", "EquipoPrueba")
 
+    # Some legacy installations have the initial misc migrations recorded as
+    # applied even though these two catalog tables were never created.  Repair
+    # that schema drift before querying or adding the definitive relations.
+    with schema_editor.connection.cursor() as cursor:
+        existing_tables = set(
+            schema_editor.connection.introspection.table_names(cursor)
+        )
+    if EquipoPrueba._meta.db_table not in existing_tables:
+        schema_editor.create_model(EquipoPrueba)
+        existing_tables.add(EquipoPrueba._meta.db_table)
+    if MetodoEquipo._meta.db_table not in existing_tables:
+        schema_editor.create_model(MetodoEquipo)
+
     fallback_equipment = None
 
     for prueba in Prueba.objects.using(database).all().iterator():
