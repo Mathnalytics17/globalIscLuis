@@ -4,6 +4,113 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def migrate_legacy_test_methods(apps, schema_editor):
+    """Replace legacy method labels with compatible catalog primary keys.
+
+    ``Prueba.metodo`` was a CharField before this migration.  PostgreSQL cannot
+    cast labels such as ``ASTM D4176`` to the bigint required by the new
+    ForeignKey.  ``0007`` later points the same column at ``MetodoEquipo``, so
+    the temporary ``MetodoPrueba`` rows deliberately share the primary key of
+    the definitive ``MetodoEquipo`` row.
+    """
+
+    database = schema_editor.connection.alias
+    Prueba = apps.get_model("misc", "Prueba")
+    MetodoPrueba = apps.get_model("misc", "MetodoPrueba")
+    MetodoEquipo = apps.get_model("misc", "MetodoEquipo")
+    EquipoPrueba = apps.get_model("misc", "EquipoPrueba")
+
+    fallback_equipment = None
+
+    for prueba in Prueba.objects.using(database).all().iterator():
+        legacy_method = (prueba.metodo or "").strip()
+        if not legacy_method:
+            Prueba.objects.using(database).filter(pk=prueba.pk).update(metodo=None)
+            continue
+
+        method = (
+            MetodoEquipo.objects.using(database)
+            .filter(codigo__iexact=legacy_method)
+            .order_by("pk")
+            .first()
+            or MetodoEquipo.objects.using(database)
+            .filter(nombre__iexact=legacy_method)
+            .order_by("pk")
+            .first()
+            or MetodoEquipo.objects.using(database)
+            .filter(norma_referencia__iexact=legacy_method)
+            .order_by("pk")
+            .first()
+        )
+
+        if method is None:
+            legacy_equipment = (prueba.equipo or "").strip()
+            equipment = None
+            if legacy_equipment:
+                equipment = (
+                    EquipoPrueba.objects.using(database)
+                    .filter(codigo__iexact=legacy_equipment)
+                    .order_by("pk")
+                    .first()
+                    or EquipoPrueba.objects.using(database)
+                    .filter(nombre__iexact=legacy_equipment)
+                    .order_by("pk")
+                    .first()
+                )
+
+            if equipment is None:
+                if fallback_equipment is None:
+                    fallback_equipment, _ = EquipoPrueba.objects.using(database).get_or_create(
+                        codigo="LEGACY-MIGRATED",
+                        defaults={
+                            "nombre": "Equipo legado migrado",
+                            "descripcion": "Creado al normalizar métodos históricos.",
+                            "activo": True,
+                        },
+                    )
+                equipment = fallback_equipment
+
+            method, _ = MetodoEquipo.objects.using(database).get_or_create(
+                equipo_prueba=equipment,
+                codigo=legacy_method[:50],
+                defaults={
+                    "nombre": legacy_method[:120],
+                    "norma_referencia": legacy_method[:120],
+                    "activo": True,
+                },
+            )
+
+        MetodoPrueba.objects.using(database).get_or_create(
+            pk=method.pk,
+            defaults={
+                "codigo": f"LEGACY-{method.pk}",
+                "nombre": legacy_method[:150],
+                "referencia_normativa": legacy_method[:150],
+                "activo": True,
+            },
+        )
+        Prueba.objects.using(database).filter(pk=prueba.pk).update(
+            metodo=str(method.pk)
+        )
+
+
+def restore_legacy_test_methods(apps, schema_editor):
+    database = schema_editor.connection.alias
+    Prueba = apps.get_model("misc", "Prueba")
+    MetodoPrueba = apps.get_model("misc", "MetodoPrueba")
+    labels = dict(
+        MetodoPrueba.objects.using(database).values_list("pk", "nombre")
+    )
+    for prueba in Prueba.objects.using(database).exclude(metodo__isnull=True).iterator():
+        try:
+            method_pk = int(prueba.metodo)
+        except (TypeError, ValueError):
+            continue
+        Prueba.objects.using(database).filter(pk=prueba.pk).update(
+            metodo=labels.get(method_pk)
+        )
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -14,10 +121,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name="prueba",
-            name="equipo",
-        ),
         migrations.RemoveField(
             model_name="prueba",
             name="tiene_submetodos",
@@ -91,6 +194,14 @@ class Migration(migrations.Migration):
                     ),
                 ],
             },
+        ),
+        migrations.RunPython(
+            migrate_legacy_test_methods,
+            restore_legacy_test_methods,
+        ),
+        migrations.RemoveField(
+            model_name="prueba",
+            name="equipo",
         ),
         migrations.AlterField(
             model_name="prueba",
