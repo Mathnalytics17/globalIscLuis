@@ -1,3 +1,5 @@
-from django.db import models
+"""Django model exports for the reports bounded context."""
 
-# Create your models here.
+from apps.reporte.api.models.index import Reporte, ReporteEnvio
+
+__all__ = ["Reporte", "ReporteEnvio"]

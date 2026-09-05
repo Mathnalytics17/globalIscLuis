@@ -1,0 +1,59 @@
+from django.urls import path
+
+from apps.misc.api.views.dynamicTechnicalConfig.index import (
+    CampoTecnicoMuestraViewSet,
+    CatalogoTecnicoCampoViewSet,
+    CatalogoTecnicoItemValorViewSet,
+    CatalogoTecnicoItemViewSet,
+    CatalogoTecnicoViewSet,
+    CriterioEvaluacionLimiteViewSet,
+    EscalaComparacionItemViewSet,
+    EscalaComparacionViewSet,
+    PruebaFuenteLimiteViewSet,
+)
+from apps.misc.api.views.lotesPruebasPredefinidos.index import LotePruebasPredefinidoViewSet
+from apps.misc.api.views.tipoGestionMuestra.index import TipoGestionMuestraViewSet
+from apps.muestras.api.views.muestraAtributoTecnico.index import MuestraAtributoTecnicoViewSet
+
+
+urlpatterns = [
+    path("technical-config/catalogs/", CatalogoTecnicoViewSet.as_view({"get": "list", "post": "create"}), name="dynamic-technical-catalogs-list"),
+    path("technical-config/catalogs/sample-form/", CatalogoTecnicoViewSet.as_view({"get": "sample_form"}), name="dynamic-technical-catalogs-sample-form"),
+    path("technical-config/catalogs/<int:pk>/", CatalogoTecnicoViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="dynamic-technical-catalogs-detail"),
+    path("technical-config/catalogs/<int:pk>/restore/", CatalogoTecnicoViewSet.as_view({"post": "restore"}), name="dynamic-technical-catalogs-restore"),
+    path("technical-config/sample-fields/", CampoTecnicoMuestraViewSet.as_view({"get": "list", "post": "create"}), name="dynamic-technical-sample-fields-list"),
+    path("technical-config/sample-fields/<int:pk>/", CampoTecnicoMuestraViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="dynamic-technical-sample-fields-detail"),
+    path("technical-config/sample-fields/<int:pk>/restore/", CampoTecnicoMuestraViewSet.as_view({"post": "restore"}), name="dynamic-technical-sample-fields-restore"),
+    path("technical-config/catalog-fields/", CatalogoTecnicoCampoViewSet.as_view({"get": "list", "post": "create"}), name="dynamic-technical-catalog-fields-list"),
+    path("technical-config/catalog-fields/<int:pk>/", CatalogoTecnicoCampoViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="dynamic-technical-catalog-fields-detail"),
+    path("technical-config/catalog-fields/<int:pk>/restore/", CatalogoTecnicoCampoViewSet.as_view({"post": "restore"}), name="dynamic-technical-catalog-fields-restore"),
+    path("technical-config/catalog-items/", CatalogoTecnicoItemViewSet.as_view({"get": "list", "post": "create"}), name="dynamic-technical-catalog-items-list"),
+    path("technical-config/catalog-items/<int:pk>/", CatalogoTecnicoItemViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="dynamic-technical-catalog-items-detail"),
+    path("technical-config/catalog-items/<int:pk>/restore/", CatalogoTecnicoItemViewSet.as_view({"post": "restore"}), name="dynamic-technical-catalog-items-restore"),
+    path("technical-config/catalog-item-values/", CatalogoTecnicoItemValorViewSet.as_view({"get": "list", "post": "create"}), name="dynamic-technical-catalog-item-values-list"),
+    path("technical-config/catalog-item-values/<int:pk>/", CatalogoTecnicoItemValorViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="dynamic-technical-catalog-item-values-detail"),
+    path("technical-config/comparison-scales/", EscalaComparacionViewSet.as_view({"get": "list", "post": "create"}), name="dynamic-comparison-scales-list"),
+    path("technical-config/comparison-scales/<int:pk>/", EscalaComparacionViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="dynamic-comparison-scales-detail"),
+    path("technical-config/comparison-scales/<int:pk>/restore/", EscalaComparacionViewSet.as_view({"post": "restore"}), name="dynamic-comparison-scales-restore"),
+    path("technical-config/comparison-scale-items/", EscalaComparacionItemViewSet.as_view({"get": "list", "post": "create"}), name="dynamic-comparison-scale-items-list"),
+    path("technical-config/comparison-scale-items/reorder/", EscalaComparacionItemViewSet.as_view({"post": "reorder"}), name="dynamic-comparison-scale-items-reorder"),
+    path("technical-config/comparison-scale-items/<int:pk>/", EscalaComparacionItemViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="dynamic-comparison-scale-items-detail"),
+    path("technical-config/comparison-scale-items/<int:pk>/restore/", EscalaComparacionItemViewSet.as_view({"post": "restore"}), name="dynamic-comparison-scale-items-restore"),
+    path("technical-config/limit-sources/", PruebaFuenteLimiteViewSet.as_view({"get": "list", "post": "create"}), name="dynamic-limit-sources-list"),
+    path("technical-config/limit-sources/resolve-preview/", PruebaFuenteLimiteViewSet.as_view({"post": "resolve_preview"}), name="dynamic-limit-sources-resolve-preview"),
+    path("technical-config/limit-sources/configure/", PruebaFuenteLimiteViewSet.as_view({"post": "configure"}), name="dynamic-limit-sources-configure"),
+    path("technical-config/limit-sources/<int:pk>/generate-fields/", PruebaFuenteLimiteViewSet.as_view({"post": "generate_fields"}), name="dynamic-limit-sources-generate-fields"),
+    path("technical-config/limit-sources/<int:pk>/", PruebaFuenteLimiteViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="dynamic-limit-sources-detail"),
+    path("technical-config/limit-sources/<int:pk>/restore/", PruebaFuenteLimiteViewSet.as_view({"post": "restore"}), name="dynamic-limit-sources-restore"),
+    path("technical-config/evaluation-criteria/", CriterioEvaluacionLimiteViewSet.as_view({"get": "list", "post": "create"}), name="dynamic-evaluation-criteria-list"),
+    path("technical-config/evaluation-criteria/<int:pk>/", CriterioEvaluacionLimiteViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="dynamic-evaluation-criteria-detail"),
+    path("technical-config/evaluation-criteria/<int:pk>/restore/", CriterioEvaluacionLimiteViewSet.as_view({"post": "restore"}), name="dynamic-evaluation-criteria-restore"),
+    path("technical-config/sample-attributes/", MuestraAtributoTecnicoViewSet.as_view({"get": "list", "post": "create"}), name="dynamic-sample-attributes-list"),
+    path("technical-config/sample-attributes/<int:pk>/", MuestraAtributoTecnicoViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="dynamic-sample-attributes-detail"),
+    path("technical-catalogs/sample-management-types/", TipoGestionMuestraViewSet.as_view({"get": "list", "post": "create"}), name="sample-management-types-list"),
+    path("technical-catalogs/sample-management-types/<int:pk>/", TipoGestionMuestraViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="sample-management-types-detail"),
+    path("technical-catalogs/sample-management-types/<int:pk>/restore/", TipoGestionMuestraViewSet.as_view({"post": "restore"}), name="sample-management-types-restore"),
+    path("technical-catalogs/predefined-test-batches/", LotePruebasPredefinidoViewSet.as_view({"get": "list", "post": "create"}), name="predefined-test-batches-list"),
+    path("technical-catalogs/predefined-test-batches/<int:pk>/", LotePruebasPredefinidoViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="predefined-test-batches-detail"),
+    path("technical-catalogs/predefined-test-batches/<int:pk>/restore/", LotePruebasPredefinidoViewSet.as_view({"post": "restore"}), name="predefined-test-batches-restore"),
+]

@@ -14,6 +14,7 @@ ENV/
 .env.test
 .env.production
 .env.sample
+!.env.example
 
 # Archivos de la base de datos
 *.sqlite3
@@ -21,9 +22,7 @@ ENV/
 *.sql
 /mysql_data/
 
-# Archivos de migraciones
-*/migrations/*.py
-!*/migrations/__init__.py
+# Las migraciones forman parte del codigo desplegable y deben versionarse.
 
 # Archivos de caché de Python
 __pycache__/
@@ -54,11 +53,20 @@ pip-wheel-metadata/
 *.log
 logs/
 
+# Artefactos locales y exportaciones temporales
+*.zip
+tmp/
+backups/
+.codex-*.log
+
 # Archivos estáticos y medios (pueden generarse)
 /staticfiles/
 /mediafiles/
 /static/
 /media/
+/globalIsc/apps/media/firmas/
+/globalIsc/apps/media/firmas_usuarios/
+/globalIsc/apps/media/reportes/
 
 # Archivos de coverage
 .coverage

@@ -1,80 +1,131 @@
 from rest_framework import serializers
-from apps.muestras.api.serializers.muestras.index import MuestraSerializer
-from apps.users.api.serializers.index import UserSerializer
-from apps.misc.api.serializers.limitesyaux.index import ElementoAnalisisSerializer
-from apps.reporte.api.models.index import Reporte,DetalleInterpretacion,Interpretacion
-import base64
-import os
-from django.core.files.storage import default_storage
-class InterpretacionSerializer(serializers.ModelSerializer):
-    muestra = MuestraSerializer()
-    usuario = UserSerializer()
-    
-    class Meta:
-        model = Interpretacion
-        fields = '__all__'
 
-class DetalleInterpretacionSerializer(serializers.ModelSerializer):
-    interpretacion = InterpretacionSerializer()
-    elemento = ElementoAnalisisSerializer()
-    
+from apps.reporte.api.models.index import Reporte, ReporteEnvio
+
+
+def _user_name(user):
+    if not user:
+        return None
+    full_name = f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}".strip()
+    return full_name or getattr(user, "email", None) or str(user)
+
+
+class ReporteEnvioSerializer(serializers.ModelSerializer):
+    enviado_por_nombre = serializers.SerializerMethodField()
+    destinatario_usuario_nombre = serializers.SerializerMethodField()
+
     class Meta:
-        model = DetalleInterpretacion
-        fields = '__all__'
+        model = ReporteEnvio
+        fields = "__all__"
+
+    def get_enviado_por_nombre(self, obj):
+        return _user_name(obj.enviado_por)
+
+    def get_destinatario_usuario_nombre(self, obj):
+        return _user_name(obj.destinatario_usuario)
+
 
 class ReporteSerializer(serializers.ModelSerializer):
-    muestra = MuestraSerializer()
-    usuario_emision = UserSerializer()
-    usuario_aprobacion = UserSerializer()
-    
+    empresa_nombre = serializers.SerializerMethodField()
+    lote_id = serializers.CharField(source="lote.id", read_only=True)
+    muestra_id = serializers.CharField(source="muestra.id", read_only=True)
+    generado_por = serializers.SerializerMethodField()
+    enviado_por = serializers.SerializerMethodField()
+    envios = ReporteEnvioSerializer(many=True, read_only=True)
+    ultima_version = serializers.SerializerMethodField()
+
     class Meta:
         model = Reporte
-        fields = '__all__'
+        fields = "__all__"
+
+    def get_empresa_nombre(self, obj):
+        lote = obj.lote or getattr(obj.muestra, "lote", None)
+        empresa = getattr(lote, "cliente_empresa", None)
+        return getattr(empresa, "nombre", None) or getattr(lote, "cliente_ocasional_nombre", None)
+
+    def get_generado_por(self, obj):
+        return _user_name(obj.usuario_emision)
+
+    def get_enviado_por(self, obj):
+        return _user_name(obj.usuario_envio)
+
+    def get_ultima_version(self, obj):
+        annotated = getattr(obj, "ultima_version_value", None)
+        if annotated is not None:
+            return annotated
+        return (
+            Reporte.objects
+            .filter(muestra_id=obj.muestra_id)
+            .order_by("-version")
+            .values_list("version", flat=True)
+            .first()
+        ) or obj.version
+
+
+class ReporteSummarySerializer(serializers.ModelSerializer):
+    """Read model for report listings.
+
+    A report snapshot can contain the complete interpretation and every result
+    of a sample. Returning it from dashboard/list screens made a small report
+    library transfer megabytes of JSON although the UI only needs metadata.
+    """
+
+    empresa_nombre = serializers.SerializerMethodField()
+    lote_id = serializers.CharField(source="lote.id", read_only=True)
+    muestra_id = serializers.CharField(source="muestra.id", read_only=True)
+    generado_por = serializers.SerializerMethodField()
+    enviado_por = serializers.SerializerMethodField()
+    ultima_version = serializers.IntegerField(
+        source="ultima_version_value", read_only=True
+    )
+
+    class Meta:
+        model = Reporte
+        fields = [
+            "id",
+            "consecutivo",
+            "empresa_nombre",
+            "lote_id",
+            "muestra_id",
+            "version",
+            "ultima_version",
+            "fecha_emision",
+            "fecha_generacion",
+            "fecha_envio",
+            "fecha_aprobacion",
+            "estatus",
+            "visible_cliente",
+            "generado_por",
+            "enviado_por",
+            "ruta_archivo",
+            "with_limites",
+        ]
+
+    def get_empresa_nombre(self, obj):
+        lote = obj.lote or getattr(obj.muestra, "lote", None)
+        empresa = getattr(lote, "cliente_empresa", None)
+        return getattr(empresa, "nombre", None) or getattr(
+            lote, "cliente_ocasional_nombre", None
+        )
+
+    def get_generado_por(self, obj):
+        return _user_name(obj.usuario_emision)
+
+    def get_enviado_por(self, obj):
+        return _user_name(obj.usuario_envio)
+
 
 class CreateReporteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Reporte
-        fields = '__all__'
-        read_only_fields = ['consecutivo']
-
-# NUEVO: Serializer con base64 incluido
-class ReporteSerializerConBase64(serializers.ModelSerializer):
-    firma_base64 = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = Reporte
-        fields = '__all__'
-    
-    def get_firma_base64(self, obj):
-        if not obj.firma_ruta:
-            return None
-        
-        try:
-            # Construir ruta del archivo
-            if obj.firma_ruta.startswith('/media/'):
-                file_path = obj.firma_ruta.replace('/media/', '')
-            else:
-                file_path = obj.firma_ruta
-            
-            # Verificar si el archivo existe
-            if not default_storage.exists(file_path):
-                return None
-            
-            # Leer y convertir a base64
-            with default_storage.open(file_path, 'rb') as f:
-                file_content = f.read()
-                base64_encoded = base64.b64encode(file_content).decode('utf-8')
-                
-                # Determinar tipo MIME
-                if file_path.lower().endswith('.png'):
-                    mime_type = 'image/png'
-                elif file_path.lower().endswith(('.jpg', '.jpeg')):
-                    mime_type = 'image/jpeg'
-                else:
-                    mime_type = 'image/png'
-                
-                return f"data:{mime_type};base64,{base64_encoded}"
-                
-        except Exception as e:
-            logger.error(f"Error en serializer firma_base64: {str(e)}")
-            return None
+        fields = "__all__"
+        read_only_fields = [
+            "consecutivo",
+            "usuario_emision",
+            "usuario_envio",
+            "fecha_emision",
+            "fecha_generacion",
+            "fecha_envio",
+            "version",
+            "snapshot",
+        ]

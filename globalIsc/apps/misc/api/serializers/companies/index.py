@@ -4,14 +4,33 @@ from apps.activesTree.api.serializers.index import MaquinaSerializer
 
 
 class EmpresaSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source='nombre', read_only=True)
+    address = serializers.CharField(source='direccion', read_only=True)
+    phone = serializers.CharField(source='telefono', read_only=True)
+    created_at = serializers.DateTimeField(source='fecha_creacion', read_only=True)
     maquinas = MaquinaSerializer(many=True, read_only=True, source='maquina_set')
     total_maquinas = serializers.IntegerField(read_only=True, source='maquina_set.count')
     usuarios = serializers.SerializerMethodField(read_only=True)
     total_usuarios = serializers.IntegerField(read_only=True, source='user_set.count')
+    admin_email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
+    admin_role = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     
     class Meta:
         model = Empresa
         fields = '__all__'
+
+    def to_internal_value(self, data):
+        if hasattr(data, 'copy'):
+            data = data.copy()
+        alias_map = {
+            'name': 'nombre',
+            'address': 'direccion',
+            'phone': 'telefono',
+        }
+        for alias, canonical in alias_map.items():
+            if alias in data and canonical not in data:
+                data[canonical] = data[alias]
+        return super().to_internal_value(data)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -31,6 +50,11 @@ class EmpresaSerializer(serializers.ModelSerializer):
         if not value or not value.strip():
             raise serializers.ValidationError("El nombre es obligatorio")
         return value.strip()
+
+    def validate_admin_email(self, value):
+        if value:
+            return value.strip().lower()
+        return value
     
     def get_usuarios(self, obj):
         """
