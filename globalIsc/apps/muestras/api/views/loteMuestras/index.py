@@ -7,6 +7,8 @@ from rest_framework.response import Response
 from apps.utils.pagination import StandardResultsSetPagination
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
+from apps.users.api.services import audit_user_action
+from django.utils import timezone
 
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
@@ -44,6 +46,8 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "destroy": "lotes.eliminar",
         "recalcular_estado": "lotes.recalcular_estado",
         "add_samples": "muestras.crear",
+        "cancel": "lotes.eliminar",
+        "reopen": "lotes.recalcular_estado",
     }
 
     def get_queryset(self):
@@ -52,6 +56,11 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             .select_related("cliente_empresa", "usuario_registro", "tipo_gestion")
             .annotate(
                 total_muestras_db=Count("muestras", distinct=True),
+                muestras_activas_db=Count(
+                    "muestras",
+                    filter=Q(muestras__estado_operativo="activa"),
+                    distinct=True,
+                ),
                 muestras_ingresadas_db=Count(
                     "muestras",
                     filter=Q(muestras__is_ingresado=True),
@@ -59,7 +68,7 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 ),
                 muestras_resultado_ingresado_db=Count(
                     "muestras",
-                    filter=Q(muestras__is_resultado_ingresado=True),
+                    filter=Q(muestras__is_resultado_ingresado=True, muestras__estado_operativo="activa"),
                     distinct=True,
                 ),
                 muestras_revisadas_db=Count(
@@ -69,7 +78,7 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 ),
                 pruebas_asignadas_db=Count(
                     "muestras__resultados",
-                    filter=Q(muestras__resultados__estado_asignacion="confirmada"),
+                    filter=Q(muestras__estado_operativo="activa", muestras__resultados__estado_asignacion="confirmada"),
                     distinct=True,
                 ),
                 pruebas_completadas_db=Count(
@@ -77,6 +86,7 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                     filter=Q(
                         muestras__resultados__estado_asignacion="confirmada",
                         muestras__resultados__completada=True,
+                        muestras__estado_operativo="activa",
                     ),
                     distinct=True,
                 ),
@@ -85,6 +95,7 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                     filter=Q(
                         muestras__resultados__estado_asignacion="confirmada",
                         muestras__resultados__is_revisada=True,
+                        muestras__estado_operativo="activa",
                     ),
                     distinct=True,
                 ),
@@ -220,6 +231,41 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         response_serializer = LoteMuestrasDetailSerializer(lote, context=self.get_serializer_context())
 
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    def destroy(self, request, *args, **kwargs):
+        lote = self.get_object()
+        if lote.estado != "borrador" or lote.muestras.exists():
+            return Response(
+                {"detail": "Solo se puede eliminar definitivamente un borrador vacío. Use Cancelar lote para conservar la trazabilidad."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        lote = self.get_object()
+        if lote.estado in ["en_laboratorio", "en_analisis", "parcial", "resultados_completos", "revisado", "reportado"]:
+            return Response({"detail": "Este lote ya inició procesamiento y no puede cancelarse desde el flujo normal."}, status=status.HTTP_409_CONFLICT)
+        reason = str(request.data.get("reason") or "").strip()
+        if not reason:
+            return Response({"reason": ["Indique el motivo de cancelación."]}, status=status.HTTP_400_BAD_REQUEST)
+        lote.estado = "cancelado"
+        lote.motivo_cancelacion = reason
+        lote.fecha_cancelacion = timezone.now()
+        lote.cancelado_por = request.user
+        lote.save(update_fields=["estado", "motivo_cancelacion", "fecha_cancelacion", "cancelado_por", "fecha_actualizacion"])
+        audit_user_action(request, "lotes.cancelar", empresa=lote.cliente_empresa, detail=reason, metadata={"lote_id": lote.id})
+        return Response(LoteMuestrasDetailSerializer(lote, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=["post"], url_path="reopen")
+    def reopen(self, request, pk=None):
+        lote = self.get_object()
+        if lote.estado != "cancelado":
+            return Response({"detail": "Solo se pueden reabrir lotes cancelados."}, status=status.HTTP_409_CONFLICT)
+        lote.estado = "registrado" if lote.muestras.exists() else "borrador"
+        lote.save(update_fields=["estado", "fecha_actualizacion"])
+        audit_user_action(request, "lotes.reabrir", empresa=lote.cliente_empresa, metadata={"lote_id": lote.id})
+        return Response(LoteMuestrasDetailSerializer(lote, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="recalcular-estado")
     def recalcular_estado(self, request, pk=None):

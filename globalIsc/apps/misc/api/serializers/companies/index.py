@@ -14,6 +14,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
     total_usuarios = serializers.IntegerField(read_only=True, source='user_set.count')
     admin_email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
     admin_role = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    transfer_existing_admin = serializers.BooleanField(write_only=True, required=False, default=False)
     
     class Meta:
         model = Empresa

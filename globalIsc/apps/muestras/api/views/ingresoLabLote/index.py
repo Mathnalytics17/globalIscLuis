@@ -14,6 +14,7 @@ from apps.muestras.api.serializers.ingresoLabLote.index import (
     CreateIngresoLabLoteSerializer,
     LoteDisponibleLaboratorioSerializer,
 )
+from apps.users.api.services import audit_user_action
 
 
 def muestras_laboratorio_prefetch(lookup="muestras"):
@@ -78,6 +79,31 @@ class IngresoLabLoteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         ingreso = serializer.save()
         response_serializer = IngresoLabLoteSerializer(ingreso, context=self.get_serializer_context())
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    def destroy(self, request, *args, **kwargs):
+        ingreso = self.get_object()
+        lote = ingreso.lote
+        has_results = lote.muestras.filter(
+            Q(resultados__completada=True)
+            | Q(resultados__valor__isnull=False) & ~Q(resultados__valor="")
+            | Q(resultados__resultados__isnull=False)
+        ).exists()
+        has_reports = lote.reportes.exists()
+        if has_results or has_reports:
+            return Response(
+                {"detail": "No se puede revertir el ingreso porque el lote ya tiene resultados o reportes."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        reason = str(request.data.get("reason") or "").strip()
+        if not reason:
+            return Response({"reason": ["Indique el motivo de reversión."]}, status=status.HTTP_400_BAD_REQUEST)
+        lote.muestras.update(is_ingresado=False)
+        lote.estado = "registrado"
+        lote.observaciones = "\n".join(filter(None, [lote.observaciones, f"[Reversión de ingreso] {reason}"]))
+        lote.save(update_fields=["estado", "observaciones", "fecha_actualizacion"])
+        ingreso.delete()
+        audit_user_action(request, "laboratorio.revertir_ingreso", empresa=lote.cliente_empresa, detail=reason, metadata={"lote_id": lote.id})
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=["get"], url_path="available-batches")
     def available_batches(self, request):

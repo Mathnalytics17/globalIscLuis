@@ -455,7 +455,15 @@ def ensure_user_profile(user, empresa, role=None, is_company_admin=False, status
 
 
 @transaction.atomic
-def create_invitation(email, empresa, invited_by=None, role=None, is_company_admin=False, metadata=None):
+def create_invitation(
+    email,
+    empresa,
+    invited_by=None,
+    role=None,
+    is_company_admin=False,
+    metadata=None,
+    allow_company_transfer=False,
+):
     normalized_email = User.objects.normalize_email(email)
     if role is None:
         role = default_company_role()
@@ -477,8 +485,19 @@ def create_invitation(email, empresa, invited_by=None, role=None, is_company_adm
             "access_status": User.AccessStatus.PENDING_INVITATION,
         },
     )
-    if not created and user.empresa_id != empresa.id:
-        raise ValueError("El correo ya pertenece a otra empresa.")
+    previous_company_id = None if created else user.empresa_id
+    if previous_company_id and previous_company_id != empresa.id and not allow_company_transfer:
+        raise ValueError(
+            "El correo ya pertenece a otra empresa. Solo GlobalOil puede transferirlo "
+            "mediante una invitación de cambio de empresa."
+        )
+
+    invitation_metadata = dict(metadata or {})
+    if previous_company_id and previous_company_id != empresa.id:
+        invitation_metadata["company_transfer"] = {
+            "from_company_id": previous_company_id,
+            "to_company_id": empresa.id,
+        }
 
     invitation = UserInvitation.objects.create(
         email=normalized_email,
@@ -488,14 +507,20 @@ def create_invitation(email, empresa, invited_by=None, role=None, is_company_adm
         invited_by=invited_by if getattr(invited_by, "is_authenticated", False) else None,
         is_company_admin=is_company_admin,
         expires_at=timezone.now() + timedelta(days=getattr(settings, "EMAIL_VERIFICATION_TOKEN_EXPIRY_DAYS", 3)),
-        metadata=metadata or {},
+        metadata=invitation_metadata,
+    )
+    existing_profile = UserCompanyProfile.objects.filter(user=user, empresa=empresa).first()
+    profile_status = (
+        UserCompanyProfile.Status.ACTIVE
+        if existing_profile and existing_profile.status == UserCompanyProfile.Status.ACTIVE and user.is_active
+        else UserCompanyProfile.Status.PENDING
     )
     ensure_user_profile(
         user,
         empresa,
         role=role,
         is_company_admin=is_company_admin,
-        status=UserCompanyProfile.Status.PENDING,
+        status=profile_status,
     )
     invitation.email_sent, invitation.email_error = deliver_invitation_email(invitation)
     return invitation
@@ -563,6 +588,18 @@ def accept_invitation(token, first_name, last_name, password, phone="", avatar=N
         )
         invitation.user = user
 
+    transfer = (invitation.metadata or {}).get("company_transfer") or {}
+    transfer_from_company_id = transfer.get("from_company_id")
+    if transfer_from_company_id and transfer_from_company_id != invitation.empresa_id:
+        UserCompanyProfile.objects.filter(user=user).exclude(
+            empresa=invitation.empresa
+        ).update(
+            status=UserCompanyProfile.Status.REMOVED,
+            is_company_admin=False,
+            blocked_at=None,
+            block_reason="Transferido a otra empresa mediante invitación.",
+        )
+
     user.first_name = first_name
     user.last_name = last_name
     user.phone = phone or user.phone
@@ -585,7 +622,12 @@ def accept_invitation(token, first_name, last_name, password, phone="", avatar=N
     invitation.status = UserInvitation.Status.ACCEPTED
     invitation.accepted_at = timezone.now()
     invitation.save(update_fields=["status", "accepted_at", "user", "updated_at"])
-    send_welcome_email(user)
+    try:
+        send_welcome_email(user)
+    except Exception:
+        # La cuenta ya quedó activada. Un fallo SMTP no debe revertir la transacción
+        # ni convertir una aceptación válida en un error 500.
+        logger.exception("No se pudo enviar el correo de bienvenida a %s", user.email)
     return user
 
 

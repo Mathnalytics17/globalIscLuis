@@ -20,6 +20,7 @@ urlpatterns = [
     path("lubrication/reports/<int:pk>/approve/", ReporteViewSet.as_view({"post": "aprobar"}), name="reporte-aprobar"),
     path("lubrication/reports/<int:pk>/aprobar/", ReporteViewSet.as_view({"post": "aprobar"}), name="reporte-aprobar-alias"),
     path("lubrication/reports/<int:pk>/send-approval/", ReporteViewSet.as_view({"post": "enviar_aprobacion"}), name="reporte-enviar-aprobacion"),
+    path("lubrication/reports/<int:pk>/annul/", ReporteViewSet.as_view({"post": "annul"}), name="reporte-annul"),
     path("lubrication/reports/<int:pk>/", ReporteViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="reporte-detail"),
     path("upload/signature/", ReporteViewSet.as_view({"post": "upload_signature"}), name="upload-signature"),
 ]

@@ -38,6 +38,7 @@ urlpatterns = [
     path("security/roles/matrix/", SecurityRoleViewSet.as_view({"get": "matrix"}), name="security-roles-matrix"),
     path("security/roles/<int:pk>/", SecurityRoleViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="security-roles-detail"),
     path("security/roles/<int:pk>/matrix/", SecurityRoleViewSet.as_view({"put": "update_matrix", "patch": "update_matrix"}), name="security-roles-update-matrix"),
+    path("security/roles/<int:pk>/reactivate/", SecurityRoleViewSet.as_view({"post": "reactivate"}), name="security-roles-reactivate"),
     path("security/user-profiles/", UserCompanyProfileViewSet.as_view({"get": "list", "post": "create"}), name="security-user-profiles-list"),
     path("security/user-profiles/<int:pk>/", UserCompanyProfileViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="security-user-profiles-detail"),
     path("security/invitations/", UserInvitationViewSet.as_view({"get": "list", "post": "create"}), name="security-invitations-list"),
@@ -50,5 +51,8 @@ urlpatterns = [
     path("security/users/<int:pk>/unblock/", UserSecurityViewSet.as_view({"post": "unblock"}), name="security-users-unblock"),
     path("security/users/<int:pk>/read-only/", UserSecurityViewSet.as_view({"post": "read_only"}), name="security-users-read-only"),
     path("security/users/<int:pk>/restore-write/", UserSecurityViewSet.as_view({"post": "restore_write"}), name="security-users-restore-write"),
+    path("security/users/<int:pk>/deactivate/", UserSecurityViewSet.as_view({"post": "deactivate"}), name="security-users-deactivate"),
+    path("security/users/<int:pk>/reactivate/", UserSecurityViewSet.as_view({"post": "reactivate"}), name="security-users-reactivate"),
+    path("security/users/<int:pk>/reinvite/", UserSecurityViewSet.as_view({"post": "reinvite"}), name="security-users-reinvite"),
     path("security/audit-logs/", UserAuditLogViewSet.as_view({"get": "list"}), name="security-audit-logs-list"),
 ]

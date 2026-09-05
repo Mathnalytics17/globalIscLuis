@@ -2,6 +2,7 @@ import logging
 
 from django.contrib.auth import get_user_model
 from django.db.models import Prefetch
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
@@ -103,6 +104,8 @@ class MuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "partial_update": "muestras.editar",
         "destroy": "muestras.eliminar",
         "history": "muestras.ver",
+        "invalidate": "muestras.eliminar",
+        "reactivate": "muestras.editar",
     }
 
     def get_queryset(self):
@@ -128,6 +131,63 @@ class MuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         except Exception as e:
             logger.warning("Error al crear muestra: %s", str(e))
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def destroy(self, request, *args, **kwargs):
+        muestra = self.get_object()
+        if muestra.is_ingresado or muestra.resultados.exists():
+            return Response(
+                {"detail": "La muestra ya entró al flujo y no puede eliminarse. Use Invalidar muestra para conservar el historial."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if muestra.lote and muestra.lote.estado not in ["borrador", "registrado"]:
+            return Response({"detail": "La muestra ya no puede retirarse de este lote."}, status=status.HTTP_409_CONFLICT)
+        lote = muestra.lote
+        response = super().destroy(request, *args, **kwargs)
+        if lote:
+            lote.recalcular_estado()
+        return response
+
+    @action(detail=True, methods=["post"], url_path="invalidate")
+    def invalidate(self, request, pk=None):
+        muestra = self.get_object()
+        if muestra.estado_operativo == "invalidada":
+            return Response({"detail": "La muestra ya está invalidada."}, status=status.HTTP_409_CONFLICT)
+        reason = str(request.data.get("reason") or "").strip()
+        if not reason:
+            return Response({"reason": ["Indique el motivo de invalidación."]}, status=status.HTTP_400_BAD_REQUEST)
+        muestra.estado_operativo = "invalidada"
+        muestra.motivo_invalidacion = reason
+        muestra.fecha_invalidacion = timezone.now()
+        muestra.invalidada_por = request.user
+        muestra.save(update_fields=["estado_operativo", "motivo_invalidacion", "fecha_invalidacion", "invalidada_por"])
+        muestra.historial.create(usuario=request.user, accion="invalidacion", cambios={"motivo": reason}, estado_nuevo={"status": "invalidada"})
+        if muestra.lote:
+            muestra.lote.recalcular_estado()
+        return Response(MuestraSerializer(muestra, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=["post"], url_path="reactivate")
+    def reactivate(self, request, pk=None):
+        muestra = self.get_object()
+        if muestra.estado_operativo != "invalidada":
+            return Response({"detail": "La muestra no está invalidada."}, status=status.HTTP_409_CONFLICT)
+        reason = str(request.data.get("reason") or "").strip()
+        if not reason:
+            return Response({"reason": ["Indique el motivo de reactivación."]}, status=status.HTTP_400_BAD_REQUEST)
+        previous_reason = muestra.motivo_invalidacion
+        muestra.estado_operativo = "activa"
+        muestra.motivo_invalidacion = ""
+        muestra.fecha_invalidacion = None
+        muestra.invalidada_por = None
+        muestra.save(update_fields=["estado_operativo", "motivo_invalidacion", "fecha_invalidacion", "invalidada_por"])
+        muestra.historial.create(
+            usuario=request.user,
+            accion="reactivacion",
+            cambios={"motivo": reason, "invalidacion_anterior": previous_reason},
+            estado_nuevo={"status": "activa"},
+        )
+        if muestra.lote:
+            muestra.lote.recalcular_estado()
+        return Response(MuestraSerializer(muestra, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["get"], url_path="history")
     def history(self, request, pk=None):

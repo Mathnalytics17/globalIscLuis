@@ -6,6 +6,10 @@ from apps.activesTree.api.models.machines.index import Maquina
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from django.utils import timezone
 class Muestra(models.Model):
+    ESTADO_OPERATIVO_CHOICES = [
+        ("activa", "Activa"),
+        ("invalidada", "Invalidada"),
+    ]
     UNIDADES_PERIODO = [
         ('horas', 'Horas'),
         ('km', 'Kilómetros'),
@@ -53,6 +57,16 @@ class Muestra(models.Model):
     unidad_periodo_equipo = models.CharField(max_length=10, choices=UNIDADES_PERIODO, blank=True, null=True)
     observaciones = models.TextField(blank=True, null=True)
     campos_adicionales = models.JSONField(blank=True, null=True)
+    estado_operativo = models.CharField(max_length=20, choices=ESTADO_OPERATIVO_CHOICES, default="activa", db_index=True)
+    motivo_invalidacion = models.TextField(blank=True, default="")
+    fecha_invalidacion = models.DateTimeField(blank=True, null=True)
+    invalidada_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="muestras_invalidadas",
+        blank=True,
+        null=True,
+    )
     usuario_registro = models.ForeignKey(User, on_delete=models.PROTECT)
     fecha_registro = models.DateTimeField(auto_now_add=True)
     is_ingresado=models.BooleanField(default=False)

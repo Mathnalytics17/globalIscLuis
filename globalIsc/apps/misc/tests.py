@@ -496,6 +496,33 @@ class CompanyApiTests(TestCase):
         self.assertIn("admin_email", response.data)
         self.assertFalse(Empresa.objects.filter(nombre="Empresa que no debe persistir").exists())
 
+    @patch("apps.users.api.services.send_invitation_email", return_value=True)
+    def test_global_can_create_company_and_explicitly_reinvite_existing_admin(self, _send_mail):
+        existing = User.objects.create_user(
+            email="admin-existente@example.com",
+            password="test-password",
+            empresa=self.empresa,
+            role=User.Role.EMPRESA,
+        )
+
+        response = self.client.post(
+            "/api/companies/",
+            {
+                "nombre": "Empresa destino",
+                "nit": "900005",
+                "admin_email": existing.email,
+                "transfer_existing_admin": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        destination = Empresa.objects.get(nombre="Empresa destino")
+        existing.refresh_from_db()
+        self.assertEqual(existing.empresa_id, self.empresa.id)
+        invitation = UserInvitation.objects.get(pk=response.data["admin_invitation"]["id"])
+        self.assertEqual(invitation.metadata["company_transfer"]["to_company_id"], destination.id)
+
 
 class SoftDeletedTechnicalConfigTests(TestCase):
     def setUp(self):

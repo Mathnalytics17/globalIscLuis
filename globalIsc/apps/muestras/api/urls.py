@@ -22,5 +22,7 @@ urlpatterns = [
     path("lubrication/sample-batches/resumen/", LoteMuestrasViewSet.as_view({"get": "resumen"}), name="sample-batches-resumen"),
     path("lubrication/sample-batches/<str:pk>/recalcular-estado/", LoteMuestrasViewSet.as_view({"post": "recalcular_estado"}), name="sample-batches-recalculate-status"),
     path("lubrication/sample-batches/<str:pk>/samples/", LoteMuestrasViewSet.as_view({"post": "add_samples"}), name="sample-batches-add-samples"),
+    path("lubrication/sample-batches/<str:pk>/cancel/", LoteMuestrasViewSet.as_view({"post": "cancel"}), name="sample-batches-cancel"),
+    path("lubrication/sample-batches/<str:pk>/reopen/", LoteMuestrasViewSet.as_view({"post": "reopen"}), name="sample-batches-reopen"),
     path("lubrication/sample-batches/<str:pk>/", LoteMuestrasViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="sample-batches-detail"),
 ]

@@ -96,6 +96,7 @@ class SecurityRoleViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
         "assignable": "usuarios.invitar",
         "matrix": "permisos.ver_matriz",
         "update_matrix": "permisos.editar_matriz",
+        "reactivate": "roles.editar",
     }
 
     def initial(self, request, *args, **kwargs):
@@ -124,6 +125,16 @@ class SecurityRoleViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
         role.save(update_fields=["active", "updated_at"])
         audit_user_action(request, "roles.disable", detail=f"Rol desactivado: {role.code}", metadata={"role_id": role.id})
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"], url_path="reactivate")
+    def reactivate(self, request, pk=None):
+        if not self._is_global():
+            self.permission_denied(request, message="Solo GlobalOil puede reactivar roles.")
+        role = self.get_object()
+        role.active = True
+        role.save(update_fields=["active", "updated_at"])
+        audit_user_action(request, "roles.reactivate", detail=f"Rol reactivado: {role.code}", metadata={"role_id": role.id})
+        return Response(self.get_serializer(role).data)
 
     @action(detail=False, methods=["get"], url_path="assignable")
     def assignable(self, request):
@@ -194,6 +205,23 @@ class UserCompanyProfileViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
         profile = serializer.save()
         audit_user_action(self.request, "users.profile_update", target_user=profile.user, empresa=profile.empresa, metadata={"profile_id": profile.id})
 
+    def destroy(self, request, *args, **kwargs):
+        profile = self.get_object()
+        if profile.user_id == request.user.id:
+            return Response({"detail": "No puede retirarse a sí mismo de la empresa."}, status=status.HTTP_400_BAD_REQUEST)
+        profile.status = UserCompanyProfile.Status.REMOVED
+        profile.is_company_admin = False
+        profile.blocked_at = None
+        profile.block_reason = str(request.data.get("reason") or "Retirado de la empresa.")
+        profile.save(update_fields=["status", "is_company_admin", "blocked_at", "block_reason", "updated_at"])
+        if profile.user.empresa_id == profile.empresa_id:
+            profile.user.is_active = False
+            profile.user.is_read_only = True
+            profile.user.access_status = User.AccessStatus.DISABLED
+            profile.user.save(update_fields=["is_active", "is_read_only", "access_status"])
+        audit_user_action(request, "users.profile_remove", target_user=profile.user, empresa=profile.empresa, detail=profile.block_reason, metadata={"profile_id": profile.id})
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class UserInvitationViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
     serializer_class = UserInvitationSerializer
@@ -227,6 +255,9 @@ class UserInvitationViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
         if not self._is_global() and empresa_id_mismatch(request.user, empresa):
             return Response({"detail": "No puede invitar usuarios a otra empresa."}, status=status.HTTP_403_FORBIDDEN)
         role = serializer.validated_data.get("role")
+        transfer_existing = serializer.validated_data.get("transfer_existing", False)
+        if transfer_existing and not self._is_global():
+            return Response({"detail": "Solo GlobalOil puede transferir usuarios entre empresas."}, status=status.HTTP_403_FORBIDDEN)
         if not is_role_assignable_by(request.user, role):
             return Response({"detail": "No puede asignar roles GlobalOil o internos."}, status=status.HTTP_403_FORBIDDEN)
         try:
@@ -240,6 +271,7 @@ class UserInvitationViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
                     "first_name": serializer.validated_data.get("first_name", ""),
                     "last_name": serializer.validated_data.get("last_name", ""),
                 },
+                allow_company_transfer=transfer_existing,
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -262,6 +294,7 @@ class UserInvitationViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
             is_company_admin=old_invitation.is_company_admin,
             invited_by=request.user,
             metadata=old_invitation.metadata,
+            allow_company_transfer=bool((old_invitation.metadata or {}).get("company_transfer")) and self._is_global(),
         )
         audit_user_action(request, "users.invitation_resend", empresa=invitation.empresa, detail=f"Invitacion reenviada a {invitation.email}", metadata={"old_id": old_invitation.id, "new_id": invitation.id})
         return Response(UserInvitationSerializer(invitation).data)
@@ -275,6 +308,10 @@ class UserInvitationViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
         invitation.save(update_fields=["status", "revoked_at", "updated_at"])
         audit_user_action(request, "users.invitation_revoke", empresa=invitation.empresa, detail=f"Invitacion revocada: {invitation.email}", metadata={"invitation_id": invitation.id})
         return Response(UserInvitationSerializer(invitation).data)
+
+    def destroy(self, request, *args, **kwargs):
+        # Las invitaciones son auditoría: DELETE significa revocar, nunca borrar.
+        return self.revoke(request, pk=kwargs.get("pk"))
 
     @action(detail=False, methods=["post"], url_path="accept", permission_classes=[AllowAny])
     def accept(self, request):
@@ -409,6 +446,83 @@ class UserSecurityViewSet(GlobalOrPermissionMixin, viewsets.GenericViewSet):
         profiles.update(status=UserCompanyProfile.Status.ACTIVE)
         audit_user_action(request, "users.restore_write", target_user=target)
         return Response(UserSerializer(target).data)
+
+    @action(detail=True, methods=["post"], url_path="deactivate")
+    def deactivate(self, request, pk=None):
+        self.check_security_permission("usuarios.eliminar")
+        target = self.get_object()
+        if target == request.user:
+            return Response({"detail": "No puede desactivar su propia cuenta."}, status=status.HTTP_400_BAD_REQUEST)
+        reason = str(request.data.get("reason") or "Cuenta desactivada.")
+        target.is_active = False
+        target.is_read_only = True
+        target.access_status = User.AccessStatus.DISABLED
+        target.block_reason = reason
+        target.blocked_by = request.user
+        target.blocked_at = timezone.now()
+        target.save(update_fields=["is_active", "is_read_only", "access_status", "block_reason", "blocked_by", "blocked_at"])
+        profiles = UserCompanyProfile.objects.filter(user=target)
+        if not self._is_global():
+            profiles = profiles.filter(empresa=request.user.empresa)
+        profiles.update(status=UserCompanyProfile.Status.REMOVED, is_company_admin=False, block_reason=reason)
+        audit_user_action(request, "users.deactivate", target_user=target, detail=reason)
+        return Response(UserSerializer(target).data)
+
+    @action(detail=True, methods=["post"], url_path="reactivate")
+    def reactivate(self, request, pk=None):
+        self.check_security_permission("usuarios.desbloquear")
+        target = self.get_object()
+        if target.empresa_id is None:
+            return Response({"detail": "Asigne una empresa antes de reactivar este usuario."}, status=status.HTTP_400_BAD_REQUEST)
+        target.is_active = True
+        target.is_read_only = False
+        target.access_status = User.AccessStatus.ACTIVE
+        target.block_reason = ""
+        target.blocked_by = None
+        target.blocked_at = None
+        target.block_scope = User.BlockScope.NONE
+        target.save(update_fields=["is_active", "is_read_only", "access_status", "block_reason", "blocked_by", "blocked_at", "block_scope"])
+        UserCompanyProfile.objects.filter(user=target, empresa_id=target.empresa_id).update(
+            status=UserCompanyProfile.Status.ACTIVE,
+            activated_at=timezone.now(),
+            blocked_at=None,
+            block_reason="",
+        )
+        audit_user_action(request, "users.reactivate", target_user=target, empresa=target.empresa)
+        return Response(UserSerializer(target).data)
+
+    @action(detail=True, methods=["post"], url_path="reinvite")
+    def reinvite(self, request, pk=None):
+        self.check_security_permission("usuarios.reenviar_invitacion")
+        target = self.get_object()
+        empresa = target.empresa
+        requested_company_id = request.data.get("empresa")
+        if requested_company_id and str(requested_company_id) != str(target.empresa_id):
+            if not self._is_global():
+                return Response({"detail": "Solo GlobalOil puede cambiar la empresa."}, status=status.HTTP_403_FORBIDDEN)
+            from apps.misc.api.models.companies.index import Empresa
+            try:
+                empresa = Empresa.objects.get(pk=requested_company_id)
+            except Empresa.DoesNotExist:
+                return Response({"empresa": ["La empresa no existe."]}, status=status.HTTP_400_BAD_REQUEST)
+        role_id = request.data.get("role")
+        role = SecurityRole.objects.filter(pk=role_id, active=True).first() if role_id else None
+        if role and not is_role_assignable_by(request.user, role):
+            return Response({"detail": "No puede asignar ese rol."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            invitation = create_invitation(
+                email=target.email,
+                empresa=empresa,
+                role=role,
+                is_company_admin=bool(request.data.get("is_company_admin", False)),
+                invited_by=request.user,
+                metadata={"first_name": target.first_name, "last_name": target.last_name},
+                allow_company_transfer=self._is_global(),
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        audit_user_action(request, "users.reinvite", target_user=target, empresa=empresa, metadata={"invitation_id": invitation.id})
+        return Response(UserInvitationSerializer(invitation).data, status=status.HTTP_201_CREATED)
 
 
 class UserAuditLogViewSet(GlobalOrPermissionMixin, viewsets.ReadOnlyModelViewSet):

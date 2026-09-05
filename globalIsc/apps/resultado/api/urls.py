@@ -7,6 +7,7 @@ urlpatterns = [
     path("lubrication/results/", ResultadoViewSet.as_view({"get": "list", "post": "create"}), name="resultado-list"),
     path("lubrication/results/<int:pk>/", ResultadoViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="resultado-detail"),
     path("lubrication/results/<int:pk>/revisar/", ResultadoViewSet.as_view({"post": "revisar"}), name="resultado-revisar"),
+    path("lubrication/results/<int:pk>/invalidate/", ResultadoViewSet.as_view({"post": "invalidate"}), name="resultado-invalidate"),
     path("lubrication/result-entry/batches/", ResultadoViewSet.as_view({"get": "entry_batches"}), name="result-entry-batches"),
     path("lubrication/result-entry/batches/<str:lote_id>/confirm-all/", ResultadoViewSet.as_view({"post": "confirm_batch_results"}), name="result-entry-confirm-batch-results"),
     path("lubrication/result-entry/batches/<str:lote_id>/", ResultadoViewSet.as_view({"get": "entry_batch_detail"}), name="result-entry-batch-detail"),

@@ -3,6 +3,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
 
@@ -75,7 +76,24 @@ class PruebaMuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         return PruebaMuestraSerializer
 
     def perform_create(self, serializer):
+        if serializer.validated_data["muestra"].estado_operativo != "activa":
+            raise ValidationError({"muestra": "No se pueden asignar pruebas a una muestra invalidada."})
         serializer.save(usuario_solicitud=self.request.user)
+
+    def perform_update(self, serializer):
+        muestra = serializer.validated_data.get("muestra", serializer.instance.muestra)
+        if muestra.estado_operativo != "activa":
+            raise ValidationError({"muestra": "No se puede modificar una prueba de una muestra invalidada."})
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        assignment = self.get_object()
+        if assignment.completada or assignment.valor not in [None, ""] or assignment.resultados.exists():
+            return Response(
+                {"detail": "Esta prueba ya tiene mediciones. Corrija o invalide el resultado; no puede desasignarse."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'], url_path='by-sample/(?P<muestra_id>[^/.]+)')
     def by_sample(self, request, muestra_id=None):
@@ -106,7 +124,7 @@ class PruebaMuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         lote = get_object_or_404(lote_queryset, pk=data['lote_id'])
         require_batch_operation(lote, "asignar_pruebas")
         sample_ids = data.get('sample_ids') or []
-        muestras_qs = lote.muestras.all()
+        muestras_qs = lote.muestras.filter(estado_operativo="activa")
         if sample_ids:
             muestras_qs = muestras_qs.filter(id__in=sample_ids)
         muestras = list(muestras_qs)
