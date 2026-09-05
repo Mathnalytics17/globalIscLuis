@@ -1,3 +1,4 @@
+import logging
 import secrets
 from datetime import timedelta
 
@@ -15,6 +16,9 @@ from apps.users.api.models.index import (
     UserCompanyProfile,
     UserInvitation,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_PERMISSION_MATRIX = [
@@ -493,8 +497,38 @@ def create_invitation(email, empresa, invited_by=None, role=None, is_company_adm
         is_company_admin=is_company_admin,
         status=UserCompanyProfile.Status.PENDING,
     )
-    send_invitation_email(invitation)
+    invitation.email_sent, invitation.email_error = deliver_invitation_email(invitation)
     return invitation
+
+
+def deliver_invitation_email(invitation):
+    """Send an invitation without turning a transient SMTP failure into an HTTP 500."""
+    try:
+        sent = send_invitation_email(invitation)
+        if sent < 1:
+            raise RuntimeError("El servidor de correo no aceptó el mensaje.")
+    except Exception as exc:  # SMTP backends raise several unrelated exception types.
+        logger.exception(
+            "No se pudo enviar la invitacion %s a %s",
+            invitation.pk,
+            invitation.email,
+        )
+        delivery = {
+            "status": "failed",
+            "attempted_at": timezone.now().isoformat(),
+            "error_type": type(exc).__name__,
+        }
+        invitation.metadata = {**(invitation.metadata or {}), "email_delivery": delivery}
+        invitation.save(update_fields=["metadata", "updated_at"])
+        return False, "No se pudo enviar el correo. La invitación quedó pendiente para reenvío."
+
+    delivery = {
+        "status": "sent",
+        "attempted_at": timezone.now().isoformat(),
+    }
+    invitation.metadata = {**(invitation.metadata or {}), "email_delivery": delivery}
+    invitation.save(update_fields=["metadata", "updated_at"])
+    return True, ""
 
 
 def send_invitation_email(invitation):
@@ -506,7 +540,7 @@ def send_invitation_email(invitation):
         f"Completa tu cuenta en el siguiente enlace:\n{invite_url}\n\n"
         f"Este enlace expira el {invitation.expires_at:%d/%m/%Y %H:%M}.\n"
     )
-    send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [invitation.email], fail_silently=False)
+    return send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [invitation.email], fail_silently=False)
 
 
 @transaction.atomic

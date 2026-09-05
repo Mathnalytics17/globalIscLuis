@@ -43,8 +43,8 @@ class PruebaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             .order_by("-id")
         )
 
-        # Para restaurar necesitamos poder encontrar pruebas inactivas
-        if self.action == "restore":
+        # Las vistas de detalle deben poder abrir, editar y restaurar registros inactivos.
+        if self.action in {"retrieve", "update", "partial_update", "restore"}:
             return queryset
 
         include_inactive = self.request.query_params.get("include_inactive")
