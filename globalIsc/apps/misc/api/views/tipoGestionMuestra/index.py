@@ -1,5 +1,4 @@
 from django.db.models import Q
-from django.db.models import Q
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -36,7 +35,8 @@ class TipoGestionMuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         search = self.request.query_params.get("search")
         user = self.request.user
 
-        if incluir_eliminados != "true":
+        detail_actions = {"retrieve", "update", "partial_update", "restore"}
+        if incluir_eliminados != "true" and self.action not in detail_actions:
             queryset = queryset.filter(deleted_at__isnull=True)
 
         if search:

@@ -1,7 +1,9 @@
 from io import StringIO
+from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.misc.api.models.companies.index import Empresa
@@ -18,7 +20,7 @@ from apps.misc.api.models.lotesPruebasPredefinidos.index import LotePruebasPrede
 from apps.misc.api.models.pruebas.index import Prueba, PruebaResultado, PruebaResultadoDivision, PruebaResultadoComponente
 from apps.misc.api.models.technicalCatalogs.index import Condicion, EquipoPrueba, MetodoEquipo, Unidad
 from apps.misc.api.models.tipoGestionMuestra.index import TipoGestionMuestra
-from apps.users.api.models.index import User
+from apps.users.api.models.index import User, UserInvitation
 
 
 class ResetGlobalOilFlowCommandTests(TestCase):
@@ -452,6 +454,98 @@ class CompanyApiTests(TestCase):
         self.empresa.refresh_from_db()
         self.assertEqual(self.empresa.nombre, "Cliente alias")
         self.assertEqual(self.empresa.direccion, "Direccion alias")
+
+    @patch("apps.users.api.services.send_invitation_email", side_effect=OSError("SMTP no disponible"))
+    def test_create_company_does_not_return_500_when_email_delivery_fails(self, _send_mail):
+        response = self.client.post(
+            "/api/companies/",
+            {
+                "nombre": "Cliente con correo pendiente",
+                "nit": "900003",
+                "admin_email": "nuevo-admin@example.com",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertFalse(response.data["admin_invitation"]["email_sent"])
+        self.assertEqual(response.data["admin_invitation"]["delivery_status"], "failed")
+        invitation = UserInvitation.objects.get(email="nuevo-admin@example.com")
+        self.assertEqual(invitation.status, UserInvitation.Status.PENDING)
+        self.assertEqual(invitation.metadata["email_delivery"]["status"], "failed")
+
+    def test_create_company_rolls_back_when_admin_email_belongs_to_another_company(self):
+        User.objects.create_user(
+            email="ocupado@example.com",
+            password="test-password",
+            empresa=self.empresa,
+            role=User.Role.EMPRESA,
+        )
+
+        response = self.client.post(
+            "/api/companies/",
+            {
+                "nombre": "Empresa que no debe persistir",
+                "nit": "900004",
+                "admin_email": "ocupado@example.com",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("admin_email", response.data)
+        self.assertFalse(Empresa.objects.filter(nombre="Empresa que no debe persistir").exists())
+
+
+class SoftDeletedTechnicalConfigTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="technical-admin@example.com",
+            password="test-password",
+            role=User.Role.GLOBAL,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_deleted_management_type_can_be_restored_and_edited(self):
+        item = TipoGestionMuestra.objects.create(
+            nombre="Gestión eliminada",
+            activo=False,
+            deleted_at=timezone.now(),
+        )
+
+        restored = self.client.post(
+            f"/api/technical-catalogs/sample-management-types/{item.id}/restore/",
+            {},
+            format="json",
+        )
+        self.assertEqual(restored.status_code, 200, restored.data)
+
+        item.activo = False
+        item.deleted_at = timezone.now()
+        item.save(update_fields=["activo", "deleted_at", "updated_at"])
+        updated = self.client.patch(
+            f"/api/technical-catalogs/sample-management-types/{item.id}/",
+            {"nombre": "Gestión recuperada"},
+            format="json",
+        )
+        self.assertEqual(updated.status_code, 200, updated.data)
+
+    def test_inactive_test_can_be_opened_and_edited(self):
+        test = Prueba.objects.create(
+            nombre_variable="Prueba inactiva",
+            acronimo="INACTIVA-QA",
+            activo=False,
+        )
+
+        detail = self.client.get(f"/api/misc/tests/{test.id}/")
+        self.assertEqual(detail.status_code, 200, detail.data)
+        updated = self.client.patch(
+            f"/api/misc/tests/{test.id}/",
+            {"nombre_variable": "Prueba inactiva editada"},
+            format="json",
+        )
+        self.assertEqual(updated.status_code, 200, updated.data)
 
 
 class TechnicalCatalogBusinessRuleTests(TestCase):

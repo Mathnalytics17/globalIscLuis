@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -47,24 +48,39 @@ class EmpresaViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         admin_email = serializer.validated_data.pop("admin_email", None)
         admin_role_id = serializer.validated_data.pop("admin_role", None)
-        empresa = serializer.save()
+        invitation = None
 
-        if admin_email:
-            role = (
-                SecurityRole.objects.filter(id=admin_role_id).first()
-                if admin_role_id
-                else SecurityRole.objects.filter(code="admin_empresa").first()
-            )
-            create_invitation(
-                email=admin_email,
-                empresa=empresa,
-                role=role,
-                is_company_admin=True,
-                invited_by=request.user,
-            )
+        try:
+            with transaction.atomic():
+                empresa = serializer.save()
+
+                if admin_email:
+                    role = (
+                        SecurityRole.objects.filter(id=admin_role_id).first()
+                        if admin_role_id
+                        else SecurityRole.objects.filter(code="admin_empresa").first()
+                    )
+                    invitation = create_invitation(
+                        email=admin_email,
+                        empresa=empresa,
+                        role=role,
+                        is_company_admin=True,
+                        invited_by=request.user,
+                    )
+        except ValueError as exc:
+            return Response({"admin_email": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
 
         audit_user_action(request, "companies.create", empresa=empresa, detail=f"Empresa creada: {empresa.nombre}")
-        return Response(self.get_serializer(empresa).data, status=status.HTTP_201_CREATED)
+        response_data = self.get_serializer(empresa).data
+        if invitation is not None:
+            response_data["admin_invitation"] = {
+                "id": invitation.id,
+                "email": invitation.email,
+                "email_sent": bool(getattr(invitation, "email_sent", False)),
+                "delivery_status": (invitation.metadata or {}).get("email_delivery", {}).get("status", "pending"),
+                "message": getattr(invitation, "email_error", "") or "Invitación enviada correctamente.",
+            }
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
         self._require_company_permission("empresas.editar")
