@@ -98,3 +98,83 @@ class IsAdminOrReadOnly(permissions.BasePermission):
             request.user.is_authenticated and 
             request.user.role == User.Role.ADMIN
         )
+
+
+class HasSecurityPermission(permissions.BasePermission):
+    """
+    Permiso basado en la matriz dinamica de roles/permisos.
+
+    Uso en ViewSets:
+        required_permission = "muestras.ver"
+
+    Los superusuarios y usuarios GLOBAL pasan siempre. El resto se valida
+    contra SecurityRole -> SecurityRolePermission -> UserCompanyProfile.
+    """
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+
+        if request.user.is_superuser or request.user.role == User.Role.GLOBAL:
+            return True
+
+        if getattr(request.user, "access_status", None) in ["BLOCKED", "DISABLED"]:
+            return False
+
+        permission_getter = getattr(view, "get_required_permission", None)
+        if callable(permission_getter):
+            permission_code = permission_getter()
+        else:
+            permission_code = getattr(view, "required_permission", None)
+        if not permission_code:
+            return True
+
+        from apps.users.api.services import user_has_permission
+
+        return user_has_permission(request.user, permission_code)
+
+
+class DenyReadOnlyWrite(permissions.BasePermission):
+    """
+    Bloquea escrituras para usuarios o empresas en modo solo lectura.
+    """
+
+    def has_permission(self, request, view):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if getattr(user, "is_read_only", False) or getattr(user, "access_status", None) == "READ_ONLY":
+            return False
+        empresa = getattr(user, "empresa", None)
+        if empresa and getattr(empresa, "status", None) == "READ_ONLY":
+            return False
+        return True
+
+
+class ActionPermissionMixin:
+    """
+    Mapea acciones de DRF a codigos de la matriz.
+
+    Ejemplo:
+        permission_action_map = {
+            "list": "muestras.ver",
+            "retrieve": "muestras.ver",
+            "create": "muestras.crear",
+        }
+    """
+
+    permission_action_map = {}
+    default_read_permission = None
+    default_write_permission = None
+
+    def get_required_permission(self):
+        action = getattr(self, "action", None)
+        if action in self.permission_action_map:
+            return self.permission_action_map[action]
+
+        request = getattr(self, "request", None)
+        if request and request.method in permissions.SAFE_METHODS:
+            return self.default_read_permission
+        return self.default_write_permission

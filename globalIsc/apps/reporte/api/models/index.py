@@ -1,67 +1,148 @@
 from django.db import models
-from apps.muestras.api.models.muestras.index import Muestra
-from apps.users.api.models.index import User
-from apps.misc.api.models.limitesyaux.index import ElementoAnalisis
 from django.utils import timezone
 
-class Interpretacion(models.Model):
-    muestra = models.OneToOneField(Muestra, on_delete=models.CASCADE, related_name='interpretacion')
-    usuario = models.ForeignKey(User, on_delete=models.PROTECT)
-    comentario_proveedor = models.TextField(blank=True, null=True)
-    fecha_interpretacion = models.DateTimeField(auto_now_add=True)
-    
-    def __str__(self):
-        return f"Interpretación para {self.muestra.id}"
+from apps.muestras.api.models.loteMuestras.index import LoteMuestras
+from apps.muestras.api.models.muestras.index import Muestra
+from apps.users.api.models.index import User
 
-class DetalleInterpretacion(models.Model):
-    NIVELES = [
-        ('verde', 'Verde - Normal'),
-        ('amarillo', 'Amarillo - Precaución'),
-        ('rojo', 'Rojo - Peligro'),
-    ]
-    
-    interpretacion = models.ForeignKey(Interpretacion, on_delete=models.CASCADE, related_name='detalles')
-    elemento = models.ForeignKey(ElementoAnalisis, on_delete=models.PROTECT)
-    resultado_obtenido = models.FloatField()
-    nivel = models.CharField(max_length=10, choices=NIVELES)
-    comentario_automatico = models.TextField(blank=True, null=True)
-    comentario_manual = models.TextField(blank=True, null=True)
-    
-    class Meta:
-        unique_together = ('interpretacion', 'elemento')
-    
-    def __str__(self):
-        return f"Detalle {self.elemento.simbolo} para {self.interpretacion.muestra.id}"
 
 class Reporte(models.Model):
     ESTATUS_CHOICES = [
-        ('borrador', 'Borrador'),
-        ('pendiente_aprobacion', 'Pendiente de Aprobación'),
-        ('aprobado', 'Aprobado'),
-        ('enviado', 'Enviado'),
+        ("borrador", "Borrador"),
+        ("pendiente_aprobacion", "Pendiente de aprobacion"),
+        ("generado", "Generado"),
+        ("aprobado", "Aprobado"),
+        ("enviado", "Enviado"),
+        ("anulado", "Anulado"),
     ]
-    
-    consecutivo = models.CharField(max_length=20, unique=True)  # R20230001
-    muestra = models.OneToOneField(Muestra, on_delete=models.CASCADE, related_name='reporte')
+
+    consecutivo = models.CharField(max_length=30, unique=True)
+    muestra = models.ForeignKey(Muestra, on_delete=models.CASCADE, related_name="reportes")
+    lote = models.ForeignKey(
+        LoteMuestras,
+        on_delete=models.CASCADE,
+        related_name="reportes",
+        blank=True,
+        null=True,
+    )
+    version = models.PositiveIntegerField(default=1)
+    snapshot = models.JSONField(blank=True, null=True)
+
     fecha_emision = models.DateTimeField()
-    usuario_emision = models.ForeignKey(User, on_delete=models.PROTECT, related_name='reportes_emitidos')
-    usuario_aprobacion = models.ForeignKey(User, on_delete=models.PROTECT, related_name='reportes_aprobados', blank=True, null=True)
+    fecha_generacion = models.DateTimeField(blank=True, null=True)
+    fecha_envio = models.DateTimeField(blank=True, null=True)
+
+    usuario_emision = models.ForeignKey(User, on_delete=models.PROTECT, related_name="reportes_emitidos")
+    usuario_aprobacion = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="reportes_aprobados",
+        blank=True,
+        null=True,
+    )
+    usuario_envio = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="reportes_enviados",
+        blank=True,
+        null=True,
+    )
     fecha_aprobacion = models.DateTimeField(blank=True, null=True)
-    observaciones = models.TextField(blank=True, null=True)
+
+    comentarios = models.TextField(blank=True, null=True)
+    conclusiones = models.TextField(blank=True, null=True)
     ruta_archivo = models.CharField(max_length=255, blank=True, null=True)
-    estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default='borrador')
-    
+    estatus = models.CharField(max_length=30, choices=ESTATUS_CHOICES, default="generado")
+    visible_cliente = models.BooleanField(default=False)
+    notas_internas = models.TextField(blank=True, null=True)
+
+    firma_ruta = models.TextField(blank=True, null=True)
+    Responsable = models.CharField(max_length=255, blank=True, null=True)
+    with_limites = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["-fecha_emision", "-id"]
+        unique_together = [("muestra", "version")]
+        indexes = [
+            models.Index(fields=["lote", "version"]),
+            models.Index(fields=["estatus"]),
+            models.Index(fields=["visible_cliente"]),
+            models.Index(fields=["fecha_emision"]),
+            models.Index(fields=["fecha_envio"]),
+        ]
+
     def __str__(self):
-        return self.consecutivo
-    
+        return f"{self.consecutivo} v{self.version}"
+
     def save(self, *args, **kwargs):
+        if not self.lote_id and self.muestra_id:
+            self.lote = self.muestra.lote
+
+        if not self.fecha_generacion:
+            self.fecha_generacion = self.fecha_emision or timezone.now()
+
+        if not self.version and self.muestra_id:
+            last_version = (
+                Reporte.objects
+                .filter(muestra_id=self.muestra_id)
+                .order_by("-version")
+                .values_list("version", flat=True)
+                .first()
+            )
+            self.version = (last_version or 0) + 1
+
         if not self.consecutivo:
-            # Generar consecutivo automático (ej: R20230001)
-            last_reporte = Reporte.objects.order_by('-consecutivo').first()
-            if last_reporte:
-                last_num = int(last_reporte.consecutivo[5:])
-                new_num = last_num + 1
-            else:
-                new_num = 1
-            self.consecutivo = f"R{timezone.now().year}{str(new_num).zfill(4)}"
+            year = timezone.now().year
+            prefix = f"R{year}"
+            last_reporte = (
+                Reporte.objects
+                .filter(consecutivo__startswith=prefix)
+                .order_by("-id")
+                .first()
+            )
+            last_num = 0
+            if last_reporte and last_reporte.consecutivo:
+                digits = "".join(ch for ch in last_reporte.consecutivo.replace(prefix, "") if ch.isdigit())
+                last_num = int(digits or 0)
+            self.consecutivo = f"{prefix}{str(last_num + 1).zfill(5)}"
+
         super().save(*args, **kwargs)
+
+
+class ReporteEnvio(models.Model):
+    CANAL_CHOICES = [
+        ("email", "Email"),
+        ("app", "Aplicacion"),
+    ]
+
+    ESTADO_CHOICES = [
+        ("enviado", "Enviado"),
+        ("fallido", "Fallido"),
+    ]
+
+    reporte = models.ForeignKey(Reporte, related_name="envios", on_delete=models.CASCADE)
+    canal = models.CharField(max_length=20, choices=CANAL_CHOICES)
+    destinatario_email = models.EmailField(blank=True, null=True)
+    destinatario_usuario = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="reportes_recibidos",
+        blank=True,
+        null=True,
+    )
+    enviado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="envios_reportes_realizados",
+        blank=True,
+        null=True,
+    )
+    fecha_envio = models.DateTimeField(auto_now_add=True)
+    estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default="enviado")
+    error = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ["-fecha_envio"]
+
+    def __str__(self):
+        return f"{self.reporte_id} - {self.canal} - {self.estado}"

@@ -1,548 +1,506 @@
 [
-    {
-      "model": "misc.prueba",
-      "pk": 1,
-      "fields": {
-        "codigo": "APAR",
-        "nombre": "Apariencia",
-        "descripcion": "Evaluación visual de la muestra",
-        "metodo_referencia": "ASTM D4176",
-        "unidad_medida": null,
-        "equipo_requerido": null,
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 2,
-      "fields": {
-        "codigo": "OLOR",
-        "nombre": "Olor",
-        "descripcion": "Evaluación sensorial del olor",
-        "metodo_referencia": null,
-        "unidad_medida": null,
-        "equipo_requerido": null,
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 3,
-      "fields": {
-        "codigo": "VIS40",
-        "nombre": "Viscosidad Cinemática 40°C",
-        "descripcion": "Viscosidad a 40°C",
-        "metodo_referencia": "ASTM D445",
-        "unidad_medida": "cSt",
-        "equipo_requerido": "Viscosímetro cinemático",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 4,
-      "fields": {
-        "codigo": "VIS100",
-        "nombre": "Viscosidad Cinemática 100°C",
-        "descripcion": "Viscosidad a 100°C",
-        "metodo_referencia": "ASTM D445",
-        "unidad_medida": "cSt",
-        "equipo_requerido": "Viscosímetro cinemático",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 5,
-      "fields": {
-        "codigo": "IV",
-        "nombre": "Índice de Viscosidad",
-        "descripcion": "Cálculo del índice de viscosidad",
-        "metodo_referencia": "ASTM D2270",
-        "unidad_medida": null,
-        "equipo_requerido": null,
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 6,
-      "fields": {
-        "codigo": "PCHISPA",
-        "nombre": "Punto de Chispa",
-        "descripcion": "Temperatura de inflamabilidad",
-        "metodo_referencia": "ASTM D92",
-        "unidad_medida": "°C",
-        "equipo_requerido": "Pensky-Martens",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 7,
-      "fields": {
-        "codigo": "DENS15",
-        "nombre": "Densidad @15°C",
-        "descripcion": "Densidad a 15°C",
-        "metodo_referencia": "ASTM D4052",
-        "unidad_medida": "g/cm³",
-        "equipo_requerido": "Densímetro digital",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 8,
-      "fields": {
-        "codigo": "NITR",
-        "nombre": "Nitración",
-        "descripcion": "Grado de degradación por nitración",
-        "metodo_referencia": "FTIR",
-        "unidad_medida": "Abs/cm",
-        "equipo_requerido": "Espectrofotómetro IR",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 9,
-      "fields": {
-        "codigo": "OXID",
-        "nombre": "Oxidación",
-        "descripcion": "Grado de degradación por oxidación",
-        "metodo_referencia": "FTIR",
-        "unidad_medida": "Abs/cm",
-        "equipo_requerido": "Espectrofotómetro IR",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 10,
-      "fields": {
-        "codigo": "HOLLIN",
-        "nombre": "Hollín",
-        "descripcion": "Contenido de hollín",
-        "metodo_referencia": "ASTM D7686",
-        "unidad_medida": "%",
-        "equipo_requerido": "Analizador de hollín",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 11,
-      "fields": {
-        "codigo": "SULF",
-        "nombre": "Sulfatación",
-        "descripcion": "Grado de sulfatación",
-        "metodo_referencia": "FTIR",
-        "unidad_medida": "Abs/cm",
-        "equipo_requerido": "Espectrofotómetro IR",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 12,
-      "fields": {
-        "codigo": "TAN",
-        "nombre": "TAN",
-        "descripcion": "Número de ácido total",
-        "metodo_referencia": "ASTM D664",
-        "unidad_medida": "mg KOH/g",
-        "equipo_requerido": "Titulador automático",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 13,
-      "fields": {
-        "codigo": "TBN",
-        "nombre": "TBN",
-        "descripcion": "Número de base total",
-        "metodo_referencia": "ASTM D2896",
-        "unidad_medida": "mg KOH/g",
-        "equipo_requerido": "Titulador automático",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 14,
-      "fields": {
-        "codigo": "AGUA",
-        "nombre": "Agua",
-        "descripcion": "Contenido de agua",
-        "metodo_referencia": "ASTM D6304",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Karl Fischer",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 15,
-      "fields": {
-        "codigo": "CONTAM",
-        "nombre": "Nivel de Contaminación",
-        "descripcion": "Nivel general de contaminación",
-        "metodo_referencia": "ISO 4406",
-        "unidad_medida": null,
-        "equipo_requerido": "Contador de partículas",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 16,
-      "fields": {
-        "codigo": "ESP1",
-        "nombre": "Espuma Seq I",
-        "descripcion": "Tendencia a la espuma (Secuencia I)",
-        "metodo_referencia": "ASTM D892",
-        "unidad_medida": "ml",
-        "equipo_requerido": "Baño termostático",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 17,
-      "fields": {
-        "codigo": "ESP2",
-        "nombre": "Espuma Seq II",
-        "descripcion": "Tendencia a la espuma (Secuencia II)",
-        "metodo_referencia": "ASTM D892",
-        "unidad_medida": "ml",
-        "equipo_requerido": "Baño termostático",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 18,
-      "fields": {
-        "codigo": "ESP3",
-        "nombre": "Espuma Seq III",
-        "descripcion": "Tendencia a la espuma (Secuencia III)",
-        "metodo_referencia": "ASTM D892",
-        "unidad_medida": "ml",
-        "equipo_requerido": "Baño termostático",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 19,
-      "fields": {
-        "codigo": "AG",
-        "nombre": "Plata (Ag)",
-        "descripcion": "Contenido de plata",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 20,
-      "fields": {
-        "codigo": "AL",
-        "nombre": "Aluminio (Al)",
-        "descripcion": "Contenido de aluminio",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 21,
-      "fields": {
-        "codigo": "B",
-        "nombre": "Boro (B)",
-        "descripcion": "Contenido de boro",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 22,
-      "fields": {
-        "codigo": "BA",
-        "nombre": "Bario (Ba)",
-        "descripcion": "Contenido de bario",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 23,
-      "fields": {
-        "codigo": "CA",
-        "nombre": "Calcio (Ca)",
-        "descripcion": "Contenido de calcio",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 24,
-      "fields": {
-        "codigo": "CD",
-        "nombre": "Cadmio (Cd)",
-        "descripcion": "Contenido de cadmio",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 25,
-      "fields": {
-        "codigo": "CR",
-        "nombre": "Cromo (Cr)",
-        "descripcion": "Contenido de cromo",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 26,
-      "fields": {
-        "codigo": "CU",
-        "nombre": "Cobre (Cu)",
-        "descripcion": "Contenido de cobre",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 27,
-      "fields": {
-        "codigo": "FE",
-        "nombre": "Hierro (Fe)",
-        "descripcion": "Contenido de hierro",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 28,
-      "fields": {
-        "codigo": "K",
-        "nombre": "Potasio (K)",
-        "descripcion": "Contenido de potasio",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 29,
-      "fields": {
-        "codigo": "LI",
-        "nombre": "Litio (Li)",
-        "descripcion": "Contenido de litio",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 30,
-      "fields": {
-        "codigo": "MG",
-        "nombre": "Magnesio (Mg)",
-        "descripcion": "Contenido de magnesio",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 31,
-      "fields": {
-        "codigo": "MN",
-        "nombre": "Manganeso (Mn)",
-        "descripcion": "Contenido de manganeso",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 32,
-      "fields": {
-        "codigo": "MO",
-        "nombre": "Molibdeno (Mo)",
-        "descripcion": "Contenido de molibdeno",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 33,
-      "fields": {
-        "codigo": "NA",
-        "nombre": "Sodio (Na)",
-        "descripcion": "Contenido de sodio",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 34,
-      "fields": {
-        "codigo": "NI",
-        "nombre": "Níquel (Ni)",
-        "descripcion": "Contenido de níquel",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 35,
-      "fields": {
-        "codigo": "P",
-        "nombre": "Fósforo (P)",
-        "descripcion": "Contenido de fósforo",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 36,
-      "fields": {
-        "codigo": "PB",
-        "nombre": "Plomo (Pb)",
-        "descripcion": "Contenido de plomo",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 37,
-      "fields": {
-        "codigo": "SB",
-        "nombre": "Antimonio (Sb)",
-        "descripcion": "Contenido de antimonio",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 38,
-      "fields": {
-        "codigo": "SI",
-        "nombre": "Silicio (Si)",
-        "descripcion": "Contenido de silicio",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 39,
-      "fields": {
-        "codigo": "SN",
-        "nombre": "Estaño (Sn)",
-        "descripcion": "Contenido de estaño",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 40,
-      "fields": {
-        "codigo": "TI",
-        "nombre": "Titanio (Ti)",
-        "descripcion": "Contenido de titanio",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 41,
-      "fields": {
-        "codigo": "V",
-        "nombre": "Vanadio (V)",
-        "descripcion": "Contenido de vanadio",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
-    },
-    {
-      "model": "misc.prueba",
-      "pk": 42,
-      "fields": {
-        "codigo": "ZN",
-        "nombre": "Zinc (Zn)",
-        "descripcion": "Contenido de zinc",
-        "metodo_referencia": "ASTM D5185",
-        "unidad_medida": "ppm",
-        "equipo_requerido": "Espectrómetro ICP",
-        "activo": true
-      }
+  {
+    "model": "misc.prueba",
+    "pk": 1,
+    "fields": {
+      "codigo": "APAR",
+      "nombre": "Apariencia",
+      "descripcion": "Evaluación visual de la muestra",
+      "metodo_referencia": "ASTM D4176",
+      "unidad_medida": null,
+      "activo": true
     }
-  ]
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 2,
+    "fields": {
+      "codigo": "OLOR",
+      "nombre": "Olor",
+      "descripcion": "Evaluación sensorial del olor",
+      "metodo_referencia": null,
+      "unidad_medida": null,
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 3,
+    "fields": {
+      "codigo": "VIS40",
+      "nombre": "Viscosidad Cinemática 40°C",
+      "descripcion": "Viscosidad a 40°C",
+      "metodo_referencia": "ASTM D445",
+      "unidad_medida": "cSt",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 4,
+    "fields": {
+      "codigo": "VIS100",
+      "nombre": "Viscosidad Cinemática 100°C",
+      "descripcion": "Viscosidad a 100°C",
+      "metodo_referencia": "ASTM D445",
+      "unidad_medida": "cSt",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 5,
+    "fields": {
+      "codigo": "IV",
+      "nombre": "Índice de Viscosidad",
+      "descripcion": "Cálculo del índice de viscosidad",
+      "metodo_referencia": "ASTM D2270",
+      "unidad_medida": null,
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 6,
+    "fields": {
+      "codigo": "PCHISPA",
+      "nombre": "Punto de Chispa",
+      "descripcion": "Temperatura de inflamabilidad",
+      "metodo_referencia": "ASTM D92",
+      "unidad_medida": "°C",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 7,
+    "fields": {
+      "codigo": "DENS15",
+      "nombre": "Densidad @15°C",
+      "descripcion": "Densidad a 15°C",
+      "metodo_referencia": "ASTM D4052",
+      "unidad_medida": "g/cm³",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 8,
+    "fields": {
+      "codigo": "NITR",
+      "nombre": "Nitración",
+      "descripcion": "Grado de degradación por nitración",
+      "metodo_referencia": "FTIR",
+      "unidad_medida": "Abs/cm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 9,
+    "fields": {
+      "codigo": "OXID",
+      "nombre": "Oxidación",
+      "descripcion": "Grado de degradación por oxidación",
+      "metodo_referencia": "FTIR",
+      "unidad_medida": "Abs/cm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 10,
+    "fields": {
+      "codigo": "HOLLIN",
+      "nombre": "Hollín",
+      "descripcion": "Contenido de hollín",
+      "metodo_referencia": "ASTM D7686",
+      "unidad_medida": "%",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 11,
+    "fields": {
+      "codigo": "SULF",
+      "nombre": "Sulfatación",
+      "descripcion": "Grado de sulfatación",
+      "metodo_referencia": "FTIR",
+      "unidad_medida": "Abs/cm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 12,
+    "fields": {
+      "codigo": "TAN",
+      "nombre": "TAN",
+      "descripcion": "Número de ácido total",
+      "metodo_referencia": "ASTM D664",
+      "unidad_medida": "mg KOH/g",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 13,
+    "fields": {
+      "codigo": "TBN",
+      "nombre": "TBN",
+      "descripcion": "Número de base total",
+      "metodo_referencia": "ASTM D2896",
+      "unidad_medida": "mg KOH/g",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 14,
+    "fields": {
+      "codigo": "AGUA",
+      "nombre": "Agua",
+      "descripcion": "Contenido de agua",
+      "metodo_referencia": "ASTM D6304",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 15,
+    "fields": {
+      "codigo": "CONTAM",
+      "nombre": "Nivel de Contaminación",
+      "descripcion": "Nivel general de contaminación",
+      "metodo_referencia": "ISO 4406",
+      "unidad_medida": null,
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 16,
+    "fields": {
+      "codigo": "ESP1",
+      "nombre": "Espuma Seq I",
+      "descripcion": "Tendencia a la espuma (Secuencia I)",
+      "metodo_referencia": "ASTM D892",
+      "unidad_medida": "ml",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 17,
+    "fields": {
+      "codigo": "ESP2",
+      "nombre": "Espuma Seq II",
+      "descripcion": "Tendencia a la espuma (Secuencia II)",
+      "metodo_referencia": "ASTM D892",
+      "unidad_medida": "ml",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 18,
+    "fields": {
+      "codigo": "ESP3",
+      "nombre": "Espuma Seq III",
+      "descripcion": "Tendencia a la espuma (Secuencia III)",
+      "metodo_referencia": "ASTM D892",
+      "unidad_medida": "ml",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 19,
+    "fields": {
+      "codigo": "AG",
+      "nombre": "Plata (Ag)",
+      "descripcion": "Contenido de plata",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 20,
+    "fields": {
+      "codigo": "AL",
+      "nombre": "Aluminio (Al)",
+      "descripcion": "Contenido de aluminio",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 21,
+    "fields": {
+      "codigo": "B",
+      "nombre": "Boro (B)",
+      "descripcion": "Contenido de boro",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 22,
+    "fields": {
+      "codigo": "BA",
+      "nombre": "Bario (Ba)",
+      "descripcion": "Contenido de bario",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 23,
+    "fields": {
+      "codigo": "CA",
+      "nombre": "Calcio (Ca)",
+      "descripcion": "Contenido de calcio",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 24,
+    "fields": {
+      "codigo": "CD",
+      "nombre": "Cadmio (Cd)",
+      "descripcion": "Contenido de cadmio",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 25,
+    "fields": {
+      "codigo": "CR",
+      "nombre": "Cromo (Cr)",
+      "descripcion": "Contenido de cromo",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 26,
+    "fields": {
+      "codigo": "CU",
+      "nombre": "Cobre (Cu)",
+      "descripcion": "Contenido de cobre",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 27,
+    "fields": {
+      "codigo": "FE",
+      "nombre": "Hierro (Fe)",
+      "descripcion": "Contenido de hierro",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 28,
+    "fields": {
+      "codigo": "K",
+      "nombre": "Potasio (K)",
+      "descripcion": "Contenido de potasio",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 29,
+    "fields": {
+      "codigo": "LI",
+      "nombre": "Litio (Li)",
+      "descripcion": "Contenido de litio",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 30,
+    "fields": {
+      "codigo": "MG",
+      "nombre": "Magnesio (Mg)",
+      "descripcion": "Contenido de magnesio",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 31,
+    "fields": {
+      "codigo": "MN",
+      "nombre": "Manganeso (Mn)",
+      "descripcion": "Contenido de manganeso",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 32,
+    "fields": {
+      "codigo": "MO",
+      "nombre": "Molibdeno (Mo)",
+      "descripcion": "Contenido de molibdeno",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 33,
+    "fields": {
+      "codigo": "NA",
+      "nombre": "Sodio (Na)",
+      "descripcion": "Contenido de sodio",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 34,
+    "fields": {
+      "codigo": "NI",
+      "nombre": "Níquel (Ni)",
+      "descripcion": "Contenido de níquel",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 35,
+    "fields": {
+      "codigo": "P",
+      "nombre": "Fósforo (P)",
+      "descripcion": "Contenido de fósforo",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 36,
+    "fields": {
+      "codigo": "PB",
+      "nombre": "Plomo (Pb)",
+      "descripcion": "Contenido de plomo",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 37,
+    "fields": {
+      "codigo": "SB",
+      "nombre": "Antimonio (Sb)",
+      "descripcion": "Contenido de antimonio",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 38,
+    "fields": {
+      "codigo": "SI",
+      "nombre": "Silicio (Si)",
+      "descripcion": "Contenido de silicio",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 39,
+    "fields": {
+      "codigo": "SN",
+      "nombre": "Estaño (Sn)",
+      "descripcion": "Contenido de estaño",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 40,
+    "fields": {
+      "codigo": "TI",
+      "nombre": "Titanio (Ti)",
+      "descripcion": "Contenido de titanio",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 41,
+    "fields": {
+      "codigo": "V",
+      "nombre": "Vanadio (V)",
+      "descripcion": "Contenido de vanadio",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  },
+  {
+    "model": "misc.prueba",
+    "pk": 42,
+    "fields": {
+      "codigo": "ZN",
+      "nombre": "Zinc (Zn)",
+      "descripcion": "Contenido de zinc",
+      "metodo_referencia": "ASTM D5185",
+      "unidad_medida": "ppm",
+      "activo": true
+    }
+  }
+]

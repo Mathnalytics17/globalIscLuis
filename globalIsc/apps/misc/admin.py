@@ -1,76 +1,95 @@
 from django.contrib import admin
-from apps.misc.api.models.companies.index import Empresa
-from apps.misc.api.models.roles.index import Rol
-from apps.misc.api.models.lubricante.index import Lubricante
-from apps.misc.api.models.tipoEquipo.index import ReferenciaEquipo, TipoEquipo
-from apps.misc.api.models.pruebas.index import Prueba
-from apps.misc.api.models.limitesyaux.index import LimiteCalidad, LimiteElemento, LimiteViscosidad, CategoriaLimite
-from apps.misc.api.models.more.index import Calidad,Color,ColorGrasa,Jabon,Marca,MarcaGrasa,NLGI,ComentarioPredefinido
-# Configuración para Empresa
-@admin.register(Empresa)
-class EmpresaAdmin(admin.ModelAdmin):
-    pass
 
-# Configuración para Rol
-@admin.register(Rol)
-class RolAdmin(admin.ModelAdmin):
-    pass
-# Configuración para Lubricante
-@admin.register(Lubricante)
-class LubricanteAdmin(admin.ModelAdmin):
-    pass
+from apps.misc.api.models.pruebas.index import (
+    Prueba,
+    PruebaResultado,
+    PruebaResultadoDivision,
+    PruebaResultadoComponente,
+    PruebaResultadoSeparador,
+    PruebaResultadoDisposicion,
+    PruebaResultadoDisposicionItem,
+)
+from apps.misc.api.models.dynamicTechnicalConfig.index import (
+    CatalogoTecnico,
+    CampoTecnicoMuestra,
+    CatalogoTecnicoCampo,
+    CatalogoTecnicoItem,
+    CatalogoTecnicoItemValor,
+    PruebaFuenteLimite,
+    CriterioEvaluacionLimite,
+    PruebaLimiteCampo,
+)
 
-# Configuración para TipoEquipo
-@admin.register(TipoEquipo)
-class TipoEquipoAdmin(admin.ModelAdmin):
-    pass
 
-# Configuración para ReferenciaEquipo
-@admin.register(ReferenciaEquipo)
-class ReferenciaEquipoAdmin(admin.ModelAdmin):
-    pass
+class PruebaResultadoInline(admin.TabularInline):
+    model = PruebaResultado
+    extra = 0
 
-# Configuración para Prueba
+
 @admin.register(Prueba)
 class PruebaAdmin(admin.ModelAdmin):
-    pass
+    list_display = ("acronimo", "nombre_variable", "metodo", "activo")
+    list_filter = ("activo", "metodo")
+    search_fields = ("acronimo", "nombre_variable", "condicion", "metodo__codigo", "metodo__nombre")
+    inlines = [PruebaResultadoInline]
 
-# Configuración para EquipoLaboratorio
+
+class PruebaResultadoDivisionInline(admin.TabularInline):
+    model = PruebaResultadoDivision
+    extra = 0
 
 
-# Configuración para CategoriaLimite
-@admin.register(CategoriaLimite)
-class CategoriaLimiteAdmin(admin.ModelAdmin):
-    pass
+@admin.register(PruebaResultado)
+class PruebaResultadoAdmin(admin.ModelAdmin):
+    list_display = ("nombre", "acronimo", "prueba", "activo")
+    list_filter = ("activo", "prueba")
+    search_fields = ("nombre", "acronimo", "prueba__acronimo", "prueba__nombre_variable")
+    inlines = [PruebaResultadoDivisionInline]
 
-# Configuración para LimiteElemento
-@admin.register(Calidad)
-class CalidadAdmin(admin.ModelAdmin):
-    pass
 
-# Configuración para LimiteViscosidad
-@admin.register(Color)
-class ColorAdmin(admin.ModelAdmin):
-    pass
+class PruebaResultadoComponenteInline(admin.TabularInline):
+    model = PruebaResultadoComponente
+    extra = 0
 
-# Configuración para LimiteCalidad
-@admin.register(ColorGrasa)
-class ColorGrasaAdmin(admin.ModelAdmin):
-    pass
 
-@admin.register(Jabon)
-class JabonAdmin(admin.ModelAdmin):
-    pass
-@admin.register(NLGI)
-class NLGIdmin(admin.ModelAdmin):
-    pass
-@admin.register(MarcaGrasa)
-class MarcaGrasaAdmin(admin.ModelAdmin):
-    pass
-@admin.register(Marca)
-class MarcaAdmin(admin.ModelAdmin):
-    pass
+class PruebaResultadoSeparadorInline(admin.TabularInline):
+    model = PruebaResultadoSeparador
+    extra = 0
 
-@admin.register(ComentarioPredefinido)
-class ComentarioPredefinidoAdmin(admin.ModelAdmin):
-    pass
+
+class PruebaResultadoDisposicionInline(admin.TabularInline):
+    model = PruebaResultadoDisposicion
+    extra = 0
+
+
+@admin.register(PruebaResultadoDivision)
+class PruebaResultadoDivisionAdmin(admin.ModelAdmin):
+    list_display = ("nombre", "resultado", "es_principal", "activo")
+    list_filter = ("activo", "es_principal")
+    search_fields = ("nombre", "resultado__nombre", "resultado__prueba__acronimo")
+    inlines = [PruebaResultadoComponenteInline, PruebaResultadoSeparadorInline, PruebaResultadoDisposicionInline]
+
+
+class PruebaResultadoDisposicionItemInline(admin.TabularInline):
+    model = PruebaResultadoDisposicionItem
+    extra = 0
+
+
+@admin.register(PruebaResultadoDisposicion)
+class PruebaResultadoDisposicionAdmin(admin.ModelAdmin):
+    list_display = ("nombre", "division", "activo")
+    list_filter = ("activo",)
+    search_fields = ("nombre", "division__nombre", "division__resultado__nombre")
+    inlines = [PruebaResultadoDisposicionItemInline]
+
+
+admin.site.register(PruebaResultadoComponente)
+admin.site.register(PruebaResultadoSeparador)
+admin.site.register(CatalogoTecnico)
+admin.site.register(CampoTecnicoMuestra)
+admin.site.register(CatalogoTecnicoCampo)
+admin.site.register(CatalogoTecnicoItem)
+admin.site.register(CatalogoTecnicoItemValor)
+admin.site.register(PruebaFuenteLimite)
+admin.site.register(CriterioEvaluacionLimite)
+admin.site.register(PruebaLimiteCampo)

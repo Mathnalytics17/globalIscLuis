@@ -2,10 +2,10 @@
 FROM python:3.12-slim 
 
 # Establecer el directorio de trabajo
-WORKDIR /usr/src/aladinosWebPrueba
+WORKDIR /usr/src/globalIsc
 
 # Establecer PYTHONPATH
-ENV PYTHONPATH=/usr/src/aladinosWebPrueba
+ENV PYTHONPATH=/usr/src/globalIsc
 
 # Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar el resto del proyecto
 COPY . .
 
-ENTRYPOINT [ "/usr/src/aladinosWebPrueba/entrypoint.sh" ]
+ENTRYPOINT [ "/usr/src/globalIsc/entrypoint.sh" ]
 
 
 # Exponer el puerto en el que se ejecutará la aplicación

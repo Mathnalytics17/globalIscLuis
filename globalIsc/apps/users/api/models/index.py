@@ -8,7 +8,7 @@ import uuid
     
 from django.db import models
 from django.contrib.auth import get_user_model
-
+from apps.misc.api.models.companies.index import Empresa
 class CustomUserManager(BaseUserManager):
     """Define a model manager for User model with no username field."""
 
@@ -48,6 +48,18 @@ class User(AbstractUser):
         LABORATORISTA = "LABORATORISTA", "Laboratorista"
         OPERARIO = "OPERARIO", "Operario"
 
+    class AccessStatus(models.TextChoices):
+        PENDING_INVITATION = "PENDING_INVITATION", "Pendiente invitacion"
+        ACTIVE = "ACTIVE", "Activo"
+        BLOCKED = "BLOCKED", "Bloqueado"
+        READ_ONLY = "READ_ONLY", "Solo lectura"
+        DISABLED = "DISABLED", "Deshabilitado"
+
+    class BlockScope(models.TextChoices):
+        NONE = "NONE", "Sin bloqueo"
+        GLOBAL = "GLOBAL", "Bloqueo GlobalOil"
+        COMPANY = "COMPANY", "Bloqueo empresa"
+
     username = None
     email = models.EmailField(_('email address'), unique=True)
     
@@ -62,11 +74,40 @@ class User(AbstractUser):
     phone = models.CharField(max_length=20, blank=True)
     
     avatar = models.CharField(max_length=255, blank=True, null=True)
+    firma_predeterminada = models.ImageField(
+        upload_to="firmas_usuarios/",
+        blank=True,
+        null=True,
+    )
     first_name = models.CharField(max_length=30, blank=True)
     last_name = models.CharField(max_length=30, blank=True)
     date_joined = models.DateTimeField(auto_now_add=True)
     last_login = models.DateTimeField(null=True, blank=True)
-    
+    # Empresa principal. Para usuarios internos de GlobalOil puede ser nula;
+    # los usuarios externos deben tener empresa por validación de invitación/perfil.
+    empresa = models.ForeignKey(Empresa, null=True, blank=True, on_delete=models.SET_NULL)
+    access_status = models.CharField(
+        max_length=30,
+        choices=AccessStatus.choices,
+        default=AccessStatus.PENDING_INVITATION,
+        db_index=True,
+    )
+    is_read_only = models.BooleanField(default=False)
+    blocked_at = models.DateTimeField(null=True, blank=True)
+    blocked_by = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="blocked_users",
+    )
+    block_reason = models.TextField(blank=True)
+    block_scope = models.CharField(
+        max_length=20,
+        choices=BlockScope.choices,
+        default=BlockScope.NONE,
+        db_index=True,
+    )
     
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
@@ -110,4 +151,157 @@ class PasswordResetToken(models.Model):
         from django.utils import timezone
         return timezone.now() < self.expires_at
 
+
+class SecurityRole(models.Model):
+    class Scope(models.TextChoices):
+        GLOBAL = "GLOBAL", "GlobalOil"
+        COMPANY = "COMPANY", "Empresa"
+        INTERNAL = "INTERNAL", "Interno"
+
+    name = models.CharField(max_length=120)
+    code = models.SlugField(max_length=80, unique=True)
+    scope = models.CharField(max_length=20, choices=Scope.choices, default=Scope.COMPANY)
+    description = models.TextField(blank=True)
+    editable = models.BooleanField(default=True)
+    active = models.BooleanField(default=True, db_index=True)
+    legacy_role = models.CharField(max_length=50, choices=User.Role.choices, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["scope", "name"]
+        indexes = [
+            models.Index(fields=["scope", "active"]),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class SecurityPermission(models.Model):
+    module = models.CharField(max_length=80, db_index=True)
+    action = models.CharField(max_length=80)
+    code = models.SlugField(max_length=140, unique=True)
+    description = models.TextField(blank=True)
+    active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["module", "action"]
+        unique_together = ("module", "action")
+        indexes = [
+            models.Index(fields=["module", "active"]),
+        ]
+
+    def __str__(self):
+        return self.code
+
+
+class SecurityRolePermission(models.Model):
+    role = models.ForeignKey(SecurityRole, on_delete=models.CASCADE, related_name="role_permissions")
+    permission = models.ForeignKey(SecurityPermission, on_delete=models.CASCADE, related_name="permission_roles")
+    allowed = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("role", "permission")
+        indexes = [
+            models.Index(fields=["role", "allowed"]),
+            models.Index(fields=["permission", "allowed"]),
+        ]
+
+    def __str__(self):
+        return f"{self.role.code}:{self.permission.code}={self.allowed}"
+
+
+class UserCompanyProfile(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pendiente"
+        ACTIVE = "ACTIVE", "Activo"
+        BLOCKED = "BLOCKED", "Bloqueado"
+        READ_ONLY = "READ_ONLY", "Solo lectura"
+        REMOVED = "REMOVED", "Removido"
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="company_profiles")
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="user_profiles")
+    role = models.ForeignKey(SecurityRole, null=True, blank=True, on_delete=models.SET_NULL, related_name="user_profiles")
+    is_company_admin = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    activated_at = models.DateTimeField(null=True, blank=True)
+    blocked_at = models.DateTimeField(null=True, blank=True)
+    block_reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "empresa")
+        indexes = [
+            models.Index(fields=["empresa", "status"]),
+            models.Index(fields=["user", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.empresa.nombre}"
+
+
+class UserInvitation(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pendiente"
+        ACCEPTED = "ACCEPTED", "Aceptada"
+        EXPIRED = "EXPIRED", "Expirada"
+        REVOKED = "REVOKED", "Revocada"
+
+    email = models.EmailField(db_index=True)
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="user_invitations")
+    role = models.ForeignKey(SecurityRole, null=True, blank=True, on_delete=models.SET_NULL, related_name="user_invitations")
+    user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="invitations")
+    token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    is_company_admin = models.BooleanField(default=False)
+    invited_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="sent_invitations")
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["empresa", "status"]),
+            models.Index(fields=["email", "status"]),
+        ]
+
+    def is_valid(self):
+        from django.utils import timezone
+        return self.status == self.Status.PENDING and timezone.now() < self.expires_at
+
+    def __str__(self):
+        return f"{self.email} -> {self.empresa.nombre}"
+
+
+class UserAuditLog(models.Model):
+    actor = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="audit_events")
+    target_user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="target_audit_events")
+    empresa = models.ForeignKey(Empresa, null=True, blank=True, on_delete=models.SET_NULL, related_name="user_audit_events")
+    action = models.CharField(max_length=120, db_index=True)
+    module = models.CharField(max_length=80, default="users", db_index=True)
+    detail = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["empresa", "created_at"]),
+            models.Index(fields=["actor", "created_at"]),
+            models.Index(fields=["target_user", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.action} @ {self.created_at:%Y-%m-%d %H:%M:%S}"
 

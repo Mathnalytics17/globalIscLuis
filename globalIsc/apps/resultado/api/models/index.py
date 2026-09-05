@@ -15,20 +15,28 @@ class Resultado(models.Model):
     
     prueba_muestra = models.ForeignKey(PruebaMuestra, on_delete=models.CASCADE, related_name='resultados')
    
-    resultado = models.FloatField()
+    resultado = models.TextField()
     fecha_medicion = models.DateTimeField()
     usuario_medicion = models.ForeignKey(User, on_delete=models.PROTECT, related_name='resultados_medidos')
     estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default='pendiente')
     observaciones = models.TextField(blank=True, null=True)
     fecha_registro = models.DateTimeField(auto_now_add=True)
     fecha_actualizacion = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['prueba_muestra', 'estatus']),
+            models.Index(fields=['prueba_muestra', 'fecha_registro']),
+            models.Index(fields=['fecha_medicion']),
+            models.Index(fields=['fecha_registro']),
+        ]
     
     def __str__(self):
-        return f"Resultado {self.id} - {self.prueba_muestra.prueba.nombre}"
+        return f"Resultado {self.id} - {self.prueba_muestra.prueba.acronimo}"
 
 class HistoricoResultado(models.Model):
     resultado = models.ForeignKey(Resultado, on_delete=models.CASCADE, related_name='historico')
-    resultado_anterior = models.FloatField()
+    resultado_anterior = models.TextField()
 
     fecha_medicion_anterior = models.DateTimeField()
     usuario_medicion = models.ForeignKey(User, on_delete=models.PROTECT)
@@ -36,6 +44,11 @@ class HistoricoResultado(models.Model):
     usuario_modificacion = models.ForeignKey(User, on_delete=models.PROTECT, related_name='modificaciones_resultados')
     fecha_modificacion = models.DateTimeField(auto_now_add=True)
     motivo_cambio = models.TextField()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['resultado', 'fecha_modificacion']),
+        ]
     
     def __str__(self):
         return f"Histórico {self.id} - Resultado {self.resultado.id}"
@@ -47,6 +60,12 @@ class RevisionResultado(models.Model):
     estatus_nuevo = models.CharField(max_length=20)
     observaciones = models.TextField(blank=True, null=True)
     fecha_revision = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['resultado', 'fecha_revision']),
+            models.Index(fields=['estatus_nuevo']),
+        ]
     
     def __str__(self):
         return f"Revisión {self.id} - Resultado {self.resultado.id}"
