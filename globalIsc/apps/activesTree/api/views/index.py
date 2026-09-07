@@ -104,6 +104,11 @@ class FolderViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         folder = self.get_object()
+        if folder.typeFolder == 'root' or str(folder.id_parent_node) == '-1':
+            return Response(
+                {'detail': 'La carpeta raíz de una empresa no se puede eliminar.'},
+                status=status.HTTP_409_CONFLICT,
+            )
         if Carpeta.objects.filter(id_parent_node=str(folder.id)).exists():
             return Response(
                 {'detail': 'No se puede eliminar una carpeta que contiene elementos.'},
@@ -129,9 +134,10 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "update": "maquinas.editar",
         "partial_update": "maquinas.editar",
         "destroy": "maquinas.eliminar",
+        "reactivate": "maquinas.editar",
     }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['empresa', 'nombre', 'tipoAceite', 'numero_serie']
+    filterset_fields = ['empresa', 'nombre', 'tipoAceite', 'numero_serie', 'activo']
     search_fields = ['nombre', 'codigo_equipo', 'numero_serie']
     ordering_fields = ['nombre', 'codigo_equipo', 'numero_serie']
     ordering = ['nombre']
@@ -141,6 +147,8 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         user = self.request.user
         if not (user.is_superuser or user.role == User.Role.GLOBAL):
             queryset = queryset.filter(empresa=user.empresa)
+        if self.action != 'reactivate' and self.request.query_params.get('include_inactive') not in ['1', 'true', 'True']:
+            queryset = queryset.filter(activo=True)
         if self.request.query_params.get('include_muestras') in ['1', 'true', 'True']:
             queryset = queryset.prefetch_related(
                 'muestra_set',
@@ -158,12 +166,17 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         machine = self.get_object()
-        if machine.puntos_muestreo.exists():
-            return Response(
-                {'detail': 'No se puede eliminar una maquina que tiene puntos de muestreo. Desactive sus puntos primero.'},
-                status=status.HTTP_409_CONFLICT,
-            )
-        return super().destroy(request, *args, **kwargs)
+        machine.activo = False
+        machine.save(update_fields=['activo'])
+        machine.puntos_muestreo.update(activo=False)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='reactivate')
+    def reactivate(self, request, pk=None):
+        machine = self.get_object()
+        machine.activo = True
+        machine.save(update_fields=['activo'])
+        return Response(self.get_serializer(machine).data)
 
 
 class PuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
@@ -177,6 +190,7 @@ class PuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         'partial_update': 'activos.gestionar_puntos',
         'destroy': 'activos.gestionar_puntos',
         'organize': 'activos.asignar_puntos',
+        'reactivate': 'activos.gestionar_puntos',
     }
 
     def get_queryset(self):
@@ -189,7 +203,7 @@ class PuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         machine = self.request.query_params.get('machine')
         if machine:
             queryset = queryset.filter(maquina_id=machine)
-        if self.request.query_params.get('include_inactive') not in ('1', 'true', 'True'):
+        if self.action != 'reactivate' and self.request.query_params.get('include_inactive') not in ('1', 'true', 'True'):
             queryset = queryset.filter(activo=True)
         return queryset
 
@@ -206,6 +220,15 @@ class PuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         point.activo = False
         point.save(update_fields=['activo', 'actualizado_en'])
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='reactivate')
+    def reactivate(self, request, pk=None):
+        point = self.get_object()
+        if not point.maquina.activo:
+            return Response({'detail': 'Reactive primero la máquina.'}, status=status.HTTP_409_CONFLICT)
+        point.activo = True
+        point.save(update_fields=['activo', 'actualizado_en'])
+        return Response(self.get_serializer(point).data)
 
     @action(detail=True, methods=['post'], url_path='organize')
     def organize(self, request, pk=None):

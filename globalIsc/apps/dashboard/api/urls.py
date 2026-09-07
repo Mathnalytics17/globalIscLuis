@@ -12,5 +12,6 @@ urlpatterns = [
     path("dashboard/notification-topics/users/", NotificationTopicViewSet.as_view({"get": "users"}), name="notification-topics-users"),
     path("dashboard/notification-topics/<int:pk>/", NotificationTopicViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="notification-topics-detail"),
     path("dashboard/notification-topics/<int:pk>/test-email/", NotificationTopicViewSet.as_view({"post": "test_email"}), name="notification-topics-test-email"),
+    path("dashboard/notification-topics/<int:pk>/restore/", NotificationTopicViewSet.as_view({"post": "restore"}), name="notification-topics-restore"),
     path("dashboard/notification-dispatches/", NotificationDispatchLogViewSet.as_view({"get": "list"}), name="notification-dispatches-list"),
 ]

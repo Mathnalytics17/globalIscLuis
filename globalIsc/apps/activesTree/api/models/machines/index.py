@@ -14,6 +14,7 @@ class Maquina(models.Model):
     
     codigo_equipo = models.CharField(max_length=255,  blank=True, null=True)
     empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE)
+    activo = models.BooleanField(default=True, db_index=True)
 
     class Meta:
         indexes = [
@@ -21,6 +22,7 @@ class Maquina(models.Model):
             models.Index(fields=['codigo_equipo']),
             models.Index(fields=['numero_serie']),
             models.Index(fields=['tipoAceite']),
+            models.Index(fields=['empresa', 'activo']),
         ]
 
     def __str__(self):

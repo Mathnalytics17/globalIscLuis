@@ -419,6 +419,7 @@ class UserInviteCreateSerializer(serializers.Serializer):
     is_company_admin = serializers.BooleanField(default=False)
     first_name = serializers.CharField(required=False, allow_blank=True)
     last_name = serializers.CharField(required=False, allow_blank=True)
+    transfer_existing = serializers.BooleanField(default=False, required=False)
 
 
 class UserInvitationAcceptSerializer(serializers.Serializer):
