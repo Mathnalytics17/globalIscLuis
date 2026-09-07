@@ -15,6 +15,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
 from apps.utils.pagination import StandardResultsSetPagination
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
@@ -1350,6 +1351,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "interpretation_sample": "interpretacion.ver",
         "save_interpretation_sample": "interpretacion.guardar",
         "interpretation_trends": "interpretacion.ver_tendencias",
+        "invalidate": "resultados.editar",
     }
     queryset = Resultado.objects.select_related(
         'prueba_muestra',
@@ -1395,6 +1397,35 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(usuario_medicion=self.request.user)
 
+    def destroy(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Los resultados no se eliminan. Use Invalidar resultado o registre una corrección."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="invalidate")
+    def invalidate(self, request, pk=None):
+        resultado = self.get_object()
+        reason = str(request.data.get("reason") or "").strip()
+        if not reason:
+            return Response({"reason": ["Indique el motivo de invalidación."]}, status=status.HTTP_400_BAD_REQUEST)
+        previous_status = resultado.estatus
+        resultado.estatus = "rechazado"
+        resultado.observaciones = "\n".join(filter(None, [resultado.observaciones, f"[Invalidado] {reason}"]))
+        resultado.save(update_fields=["estatus", "observaciones", "fecha_actualizacion"])
+        RevisionResultado.objects.create(
+            resultado=resultado,
+            usuario_revision=request.user,
+            estatus_anterior=previous_status,
+            estatus_nuevo="rechazado",
+            observaciones=f"Invalidado: {reason}",
+        )
+        prueba_muestra = resultado.prueba_muestra
+        prueba_muestra.estatus = "rechazado"
+        prueba_muestra.is_revisada = False
+        prueba_muestra.save(update_fields=["estatus", "is_revisada"])
+        return Response(ResultadoSerializer(resultado, context=self.get_serializer_context()).data)
+
     def _save_result_payload(
         self,
         request,
@@ -1408,6 +1439,8 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             PruebaMuestra.objects.select_related("muestra", "muestra__lote", "prueba"),
             pk=prueba_muestra_id,
         )
+        if prueba_muestra.muestra.estado_operativo != "activa":
+            raise ValidationError("No se pueden guardar resultados para una muestra invalidada.")
         require_batch_operation(prueba_muestra.muestra.lote, "ingresar_resultados")
         values = request.data.get("values", [])
         observaciones = request.data.get("observaciones", "")
@@ -2652,6 +2685,8 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["post"])
     def mark_sample_test_reviewed(self, request, prueba_muestra_id=None):
         prueba_muestra = get_object_or_404(PruebaMuestra.objects.select_related("muestra", "muestra__lote"), pk=prueba_muestra_id)
+        if prueba_muestra.muestra.estado_operativo != "activa":
+            return Response({"detail": "Una muestra invalidada no puede revisarse."}, status=status.HTTP_409_CONFLICT)
         require_batch_operation(prueba_muestra.muestra.lote, "revisar_resultados")
         if not prueba_muestra.completada:
             return Response(
@@ -2689,6 +2724,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         require_batch_operation(lote, "revisar_resultados")
         incomplete_count = PruebaMuestra.objects.filter(
             muestra__lote=lote,
+            muestra__estado_operativo="activa",
             estado_asignacion="confirmada",
         ).exclude(completada=True).count()
         if incomplete_count:
@@ -2699,6 +2735,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         tests = (
             PruebaMuestra.objects.filter(
                 muestra__lote=lote,
+                muestra__estado_operativo="activa",
                 estado_asignacion="confirmada",
                 resultados__isnull=False,
             )

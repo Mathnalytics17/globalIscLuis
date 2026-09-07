@@ -21,4 +21,14 @@ urlpatterns = [
         MuestraViewSet.as_view({"get": "history"}),
         name="samples-history",
     ),
+    path(
+        "lubrication/samples/<str:pk>/invalidate/",
+        MuestraViewSet.as_view({"post": "invalidate"}),
+        name="samples-invalidate",
+    ),
+    path(
+        "lubrication/samples/<str:pk>/reactivate/",
+        MuestraViewSet.as_view({"post": "reactivate"}),
+        name="samples-reactivate",
+    ),
 ]

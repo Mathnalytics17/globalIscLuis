@@ -1,6 +1,7 @@
 from django.test import TestCase
 from django.utils import timezone
 from datetime import timedelta
+from rest_framework.test import APIClient
 
 from apps.misc.api.models.companies.index import Empresa
 from apps.misc.api.models.dynamicTechnicalConfig.index import (
@@ -19,6 +20,7 @@ from apps.misc.api.models.pruebas.index import (
 )
 from apps.muestras.api.models.muestraAtributoTecnico.index import MuestraAtributoTecnico
 from apps.muestras.api.models.muestras.index import Muestra
+from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.serializers.loteMuestras.index import LoteMuestrasCreateSerializer
 from apps.muestras.api.serializers.muestras.index import CreateMuestraSerializer
 from apps.muestras.api.services.limit_engine import (
@@ -34,6 +36,58 @@ from apps.muestras.api.views.sampleBatchExcel.index import (
 )
 from apps.misc.api.views.dynamicTechnicalConfig.index import _build_limit_fields_from_prueba
 from apps.users.api.models.index import User
+
+
+class SampleLifecycleSafetyTests(TestCase):
+    def setUp(self):
+        self.empresa = Empresa.objects.create(nombre="Empresa ciclo seguro")
+        self.user = User.objects.create_superuser(
+            email="lifecycle@example.com",
+            password="test-password",
+            empresa=self.empresa,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.lote = LoteMuestras.objects.create(
+            tipo_cliente="registrado",
+            cliente_empresa=self.empresa,
+            fecha_envio=timezone.localdate(),
+            estado="registrado",
+            usuario_registro=self.user,
+        )
+        self.muestra = Muestra.objects.create(
+            lote=self.lote,
+            fecha_toma=timezone.now(),
+            usuario_registro=self.user,
+        )
+
+    def test_non_empty_batch_cannot_be_physically_deleted(self):
+        response = self.client.delete(f"/api/lubrication/sample-batches/{self.lote.id}/")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(LoteMuestras.objects.filter(pk=self.lote.pk).exists())
+        self.assertTrue(Muestra.objects.filter(pk=self.muestra.pk).exists())
+
+    def test_sample_invalidation_and_reactivation_keep_the_record(self):
+        invalidated = self.client.post(
+            f"/api/lubrication/samples/{self.muestra.id}/invalidate/",
+            {"reason": "Identificación incorrecta"},
+            format="json",
+        )
+        self.assertEqual(invalidated.status_code, 200)
+        self.muestra.refresh_from_db()
+        self.assertEqual(self.muestra.estado_operativo, "invalidada")
+        self.assertEqual(self.muestra.motivo_invalidacion, "Identificación incorrecta")
+
+        reactivated = self.client.post(
+            f"/api/lubrication/samples/{self.muestra.id}/reactivate/",
+            {"reason": "Identificación verificada"},
+            format="json",
+        )
+        self.assertEqual(reactivated.status_code, 200)
+        self.muestra.refresh_from_db()
+        self.assertEqual(self.muestra.estado_operativo, "activa")
+        self.assertTrue(Muestra.objects.filter(pk=self.muestra.pk).exists())
 
 
 class SamplePartialUpdateTests(TestCase):

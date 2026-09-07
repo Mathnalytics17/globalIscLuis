@@ -1,4 +1,6 @@
-from rest_framework import filters, viewsets
+from rest_framework import filters, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 
@@ -30,6 +32,19 @@ class BaseTechnicalCatalogViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
         return queryset
 
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance.activo = False
+        instance.save(update_fields=["activo", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"], url_path="reactivate")
+    def reactivate(self, request, pk=None):
+        instance = self.get_object()
+        instance.activo = True
+        instance.save(update_fields=["activo", "updated_at"])
+        return Response(self.get_serializer(instance).data)
+
 
 class EquipoPruebaViewSet(BaseTechnicalCatalogViewSet):
     permission_action_map = {
@@ -39,6 +54,7 @@ class EquipoPruebaViewSet(BaseTechnicalCatalogViewSet):
         "update": "equipos_prueba.editar",
         "partial_update": "equipos_prueba.editar",
         "destroy": "equipos_prueba.eliminar",
+        "reactivate": "equipos_prueba.editar",
     }
     queryset = EquipoPrueba.objects.all()
     serializer_class = EquipoPruebaSerializer
@@ -53,6 +69,7 @@ class UnidadViewSet(BaseTechnicalCatalogViewSet):
         "update": "unidades.editar",
         "partial_update": "unidades.editar",
         "destroy": "unidades.eliminar",
+        "reactivate": "unidades.editar",
     }
     queryset = Unidad.objects.all()
     serializer_class = UnidadSerializer
@@ -67,6 +84,7 @@ class MetodoEquipoViewSet(BaseTechnicalCatalogViewSet):
         "update": "equipos_prueba.editar",
         "partial_update": "equipos_prueba.editar",
         "destroy": "equipos_prueba.eliminar",
+        "reactivate": "equipos_prueba.editar",
     }
     queryset = MetodoEquipo.objects.select_related("equipo_prueba")
     serializer_class = MetodoEquipoSerializer
@@ -90,6 +108,7 @@ class CondicionViewSet(BaseTechnicalCatalogViewSet):
         "update": "condiciones.editar",
         "partial_update": "condiciones.editar",
         "destroy": "condiciones.eliminar",
+        "reactivate": "condiciones.editar",
     }
     queryset = Condicion.objects.select_related("unidad")
     serializer_class = CondicionSerializer

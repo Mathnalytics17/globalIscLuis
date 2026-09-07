@@ -89,6 +89,9 @@ class LoteMuestrasListSerializer(serializers.ModelSerializer):
             "tipo_gestion",
             "estado",
             "observaciones",
+            "motivo_cancelacion",
+            "fecha_cancelacion",
+            "cancelado_por",
             "usuario_registro",
             "fecha_registro",
             "fecha_actualizacion",
@@ -118,7 +121,7 @@ class LoteMuestrasListSerializer(serializers.ModelSerializer):
         return getattr(obj, "total_muestras_db", obj.total_muestras)
 
     def get_progreso(self, obj):
-        total = getattr(obj, "total_muestras_db", None)
+        total = getattr(obj, "muestras_activas_db", None)
         procesadas = getattr(obj, "muestras_resultado_ingresado_db", None)
 
         if total is not None and procesadas is not None:
@@ -141,6 +144,8 @@ class LoteMuestrasListSerializer(serializers.ModelSerializer):
             if hasattr(muestras, "all"):
                 pruebas = []
                 for muestra in muestras.all():
+                    if muestra.estado_operativo != "activa":
+                        continue
                     pruebas.extend(list(getattr(muestra, "resultados", []).all()))
                 total = len([item for item in pruebas if item.estado_asignacion == "confirmada"])
                 completadas = len([item for item in pruebas if item.estado_asignacion == "confirmada" and item.completada])

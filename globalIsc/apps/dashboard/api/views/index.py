@@ -5,6 +5,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 
 from apps.dashboard.api.serializers.index import (
     NotificationDispatchLogSerializer,
@@ -31,9 +32,22 @@ class OperationalCenterViewSet(viewsets.ViewSet):
         return Response(result, status=http_status)
 
 
-class NotificationTopicViewSet(viewsets.ModelViewSet):
+class NotificationTopicViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     serializer_class = NotificationTopicSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, DenyReadOnlyWrite, HasSecurityPermission]
+    permission_action_map = {
+        "list": "config_tecnica.ver",
+        "retrieve": "config_tecnica.ver",
+        "event_types": "config_tecnica.ver",
+        "roles": "config_tecnica.ver",
+        "users": "config_tecnica.ver",
+        "create": "config_tecnica.editar",
+        "update": "config_tecnica.editar",
+        "partial_update": "config_tecnica.editar",
+        "destroy": "config_tecnica.editar",
+        "restore": "config_tecnica.editar",
+        "test_email": "config_tecnica.editar",
+    }
 
     def get_queryset(self):
         return NotificationTopic.objects.prefetch_related("users").all()
@@ -45,6 +59,13 @@ class NotificationTopicViewSet(viewsets.ModelViewSet):
             topic.active = False
             topic.save(update_fields=["active", "updated_at"])
         return Response(self.get_serializer(topic).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="restore")
+    def restore(self, request, pk=None):
+        topic = self.get_object()
+        topic.active = True
+        topic.save(update_fields=["active", "updated_at"])
+        return Response(self.get_serializer(topic).data)
 
     @action(detail=False, methods=["get"], url_path="event-types")
     def event_types(self, request):
@@ -134,7 +155,8 @@ class NotificationTopicViewSet(viewsets.ModelViewSet):
         return Response({"detail": "Correo de prueba enviado.", "recipients": recipients})
 
 
-class NotificationDispatchLogViewSet(viewsets.ReadOnlyModelViewSet):
+class NotificationDispatchLogViewSet(ActionPermissionMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = NotificationDispatchLogSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasSecurityPermission]
+    permission_action_map = {"list": "config_tecnica.ver", "retrieve": "config_tecnica.ver"}
     queryset = NotificationDispatchLog.objects.select_related("topic").all()

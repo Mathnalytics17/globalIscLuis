@@ -48,6 +48,7 @@ class EmpresaViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         admin_email = serializer.validated_data.pop("admin_email", None)
         admin_role_id = serializer.validated_data.pop("admin_role", None)
+        transfer_existing_admin = serializer.validated_data.pop("transfer_existing_admin", False)
         invitation = None
 
         try:
@@ -66,6 +67,7 @@ class EmpresaViewSet(viewsets.ModelViewSet):
                         role=role,
                         is_company_admin=True,
                         invited_by=request.user,
+                        allow_company_transfer=bool(transfer_existing_admin and self._is_global()),
                     )
         except ValueError as exc:
             return Response({"admin_email": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
@@ -174,13 +176,27 @@ class EmpresaViewSet(viewsets.ModelViewSet):
             if role_id
             else SecurityRole.objects.filter(code="admin_empresa").first()
         )
-        invitation = create_invitation(
-            email=email,
-            empresa=empresa,
-            role=role,
-            is_company_admin=True,
-            invited_by=request.user,
-        )
+        try:
+            invitation = create_invitation(
+                email=email,
+                empresa=empresa,
+                role=role,
+                is_company_admin=True,
+                invited_by=request.user,
+                allow_company_transfer=(
+                    str(request.data.get("transfer_existing", "")).lower() in {"1", "true", "yes"}
+                    and self._is_global()
+                ),
+            )
+        except ValueError as exc:
+            return Response(
+                {
+                    "email": [str(exc)],
+                    "code": "existing_user_conflict",
+                    "can_transfer": self._is_global(),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         audit_user_action(
             request,
             "companies.invite_admin",

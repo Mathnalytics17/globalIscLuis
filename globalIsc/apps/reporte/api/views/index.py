@@ -68,8 +68,9 @@ def _has_interpretation(muestra):
 def _mark_lote_reported_if_ready(lote):
     if not lote:
         return
-    total = lote.muestras.count()
-    reported = lote.muestras.filter(reportes__isnull=False).distinct().count()
+    active_samples = lote.muestras.filter(estado_operativo="activa")
+    total = active_samples.count()
+    reported = active_samples.filter(reportes__isnull=False).distinct().count()
     if total and reported == total:
         lote.estado = "reportado"
         update_fields = ["estado"]
@@ -331,6 +332,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "upload_signature": "reportes.subir_firma",
         "aprobar": "reportes.generar",
         "enviar_aprobacion": "reportes.enviar_email",
+        "annul": "reportes.generar",
     }
     queryset = Reporte.objects.select_related(
         "muestra",
@@ -419,9 +421,27 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         return self.update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Use la acción Anular reporte e indique el motivo. Los reportes no se eliminan."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="annul")
+    def annul(self, request, pk=None):
         reporte = self.get_object()
+        if reporte.estatus == "anulado":
+            return Response({"detail": "El reporte ya está anulado."}, status=status.HTTP_409_CONFLICT)
+        if reporte.estatus == "enviado" or reporte.fecha_envio or reporte.visible_cliente:
+            return Response(
+                {"detail": "Un reporte enviado o publicado no se anula directamente. Genere una versión sustitutiva y publíquela."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        reason = str(request.data.get("reason") or "").strip()
+        if not reason:
+            return Response({"reason": ["Indique el motivo de anulación."]}, status=status.HTTP_400_BAD_REQUEST)
         reporte.estatus = "anulado"
-        reporte.save(update_fields=["estatus"])
+        reporte.notas_internas = "\n".join(filter(None, [reporte.notas_internas, f"[Anulación] {reason}"]))
+        reporte.save(update_fields=["estatus", "notas_internas"])
         return Response({"detail": "Reporte anulado."})
 
     def _build_snapshot(self, muestra, request_user):
@@ -548,6 +568,8 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         )
         if not muestra:
             return Response({"detail": "Muestra no encontrada."}, status=status.HTTP_404_NOT_FOUND)
+        if muestra.estado_operativo != "activa":
+            return Response({"detail": "No puede generar un reporte para una muestra invalidada."}, status=status.HTTP_409_CONFLICT)
         if not muestra.is_revisado:
             return Response({"detail": "No puede generar reporte: la muestra aun no esta revisada."}, status=status.HTTP_400_BAD_REQUEST)
         if not _has_interpretation(muestra):
@@ -568,7 +590,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         samples = list(
             Muestra.objects
             .select_related("lote", "lote__cliente_empresa", "lote__tipo_gestion", "referencia_equipo")
-            .filter(lote=lote)
+            .filter(lote=lote, estado_operativo="activa")
             .order_by("id")
         )
         not_reviewed = [sample.id for sample in samples if not sample.is_revisado]

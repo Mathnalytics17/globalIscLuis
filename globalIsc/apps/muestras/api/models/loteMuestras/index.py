@@ -76,6 +76,15 @@ class LoteMuestras(models.Model):
     )
 
     observaciones = models.TextField(blank=True, null=True)
+    motivo_cancelacion = models.TextField(blank=True, default="")
+    fecha_cancelacion = models.DateTimeField(blank=True, null=True)
+    cancelado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="lotes_cancelados",
+        blank=True,
+        null=True,
+    )
 
     usuario_registro = models.ForeignKey(
         User,
@@ -139,7 +148,8 @@ class LoteMuestras(models.Model):
 
     @property
     def progreso(self):
-        total = self.total_muestras
+        muestras_activas = self.muestras.filter(estado_operativo="activa")
+        total = muestras_activas.count()
 
         if total == 0:
             return {
@@ -149,7 +159,7 @@ class LoteMuestras(models.Model):
                 "label": "0/0 procesadas",
             }
 
-        procesadas = self.muestras_resultado_ingresado
+        procesadas = muestras_activas.filter(is_resultado_ingresado=True).count()
         porcentaje = round((procesadas / total) * 100)
 
         return {
@@ -160,14 +170,14 @@ class LoteMuestras(models.Model):
         }
 
     def recalcular_estado(self, save=True):
-        muestras = self.muestras.all()
+        muestras = self.muestras.filter(estado_operativo="activa")
         total = muestras.count()
 
         if self.estado == "cancelado":
             return self.estado
 
         if total == 0:
-            nuevo_estado = "borrador"
+            nuevo_estado = "registrado" if self.muestras.exists() else "borrador"
         elif muestras.filter(is_revisado=True).count() == total:
             nuevo_estado = "revisado"
         elif muestras.filter(is_resultado_ingresado=True).count() == total:
