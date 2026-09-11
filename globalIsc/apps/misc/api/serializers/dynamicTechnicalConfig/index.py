@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from apps.misc.api.models.dynamicTechnicalConfig.index import (
     CatalogoTecnico,
+    CatalogoTecnicoVersion,
     CampoTecnicoMuestra,
     CatalogoTecnicoCampo,
     CatalogoTecnicoItem,
@@ -43,6 +44,14 @@ class CatalogoTecnicoItemValorSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class CatalogoTecnicoVersionSerializer(serializers.ModelSerializer):
+    items_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = CatalogoTecnicoVersion
+        fields = "__all__"
+
+
 class CatalogoTecnicoItemSerializer(serializers.ModelSerializer):
     valores = CatalogoTecnicoItemValorSerializer(many=True, required=False)
 
@@ -52,6 +61,13 @@ class CatalogoTecnicoItemSerializer(serializers.ModelSerializer):
 
     def validate_codigo(self, value):
         return slugify(value or "").replace("-", "_")
+
+    def validate(self, attrs):
+        version = attrs.get("version") or getattr(self.instance, "version", None)
+        catalogo = attrs.get("catalogo") or getattr(self.instance, "catalogo", None)
+        if version and catalogo and version.catalogo_id != catalogo.id:
+            raise serializers.ValidationError({"version": "La versión debe pertenecer al catálogo seleccionado."})
+        return attrs
 
     @transaction.atomic
     def create(self, validated_data):
@@ -82,6 +98,8 @@ class CatalogoTecnicoItemSerializer(serializers.ModelSerializer):
 class CatalogoTecnicoSerializer(serializers.ModelSerializer):
     campos = CatalogoTecnicoCampoSerializer(many=True, read_only=True)
     items = CatalogoTecnicoItemSerializer(many=True, read_only=True)
+    versiones = CatalogoTecnicoVersionSerializer(many=True, read_only=True)
+    version_actual_info = CatalogoTecnicoVersionSerializer(source="version_actual", read_only=True)
 
     class Meta:
         model = CatalogoTecnico

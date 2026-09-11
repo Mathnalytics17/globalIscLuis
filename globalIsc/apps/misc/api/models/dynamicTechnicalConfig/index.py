@@ -53,6 +53,10 @@ class CatalogoTecnico(SoftDeleteModel):
     es_requerido_en_muestra = models.BooleanField(default=False)
     permite_desconocido = models.BooleanField(default=True)
     orden = models.PositiveIntegerField(default=1)
+    version_actual = models.ForeignKey(
+        "CatalogoTecnicoVersion", on_delete=models.SET_NULL, blank=True, null=True,
+        related_name="catalogos_actuales",
+    )
 
     class Meta:
         ordering = ["orden", "nombre"]
@@ -64,6 +68,24 @@ class CatalogoTecnico(SoftDeleteModel):
 
     def __str__(self):
         return self.nombre
+
+
+class CatalogoTecnicoVersion(SoftDeleteModel):
+    """Edición publicada de un catálogo ante cambios de una norma técnica."""
+
+    catalogo = models.ForeignKey(CatalogoTecnico, on_delete=models.CASCADE, related_name="versiones")
+    numero = models.PositiveIntegerField()
+    nombre = models.CharField(max_length=120, blank=True)
+    norma_referencia = models.CharField(max_length=160, blank=True)
+    fecha_vigencia = models.DateField(blank=True, null=True)
+    notas = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ["catalogo", "-numero"]
+        unique_together = ("catalogo", "numero")
+
+    def __str__(self):
+        return f"{self.catalogo.nombre} · v{self.numero}"
 
 
 class CampoTecnicoMuestra(SoftDeleteModel):
@@ -138,6 +160,7 @@ class CatalogoTecnicoCampo(SoftDeleteModel):
 
 class CatalogoTecnicoItem(SoftDeleteModel):
     catalogo = models.ForeignKey(CatalogoTecnico, on_delete=models.CASCADE, related_name="items")
+    version = models.ForeignKey(CatalogoTecnicoVersion, on_delete=models.PROTECT, related_name="items", blank=True, null=True)
     nombre = models.CharField(max_length=160)
     codigo = models.SlugField(max_length=120)
     descripcion = models.TextField(blank=True, null=True)
@@ -145,7 +168,7 @@ class CatalogoTecnicoItem(SoftDeleteModel):
 
     class Meta:
         ordering = ["catalogo__orden", "nombre"]
-        unique_together = ("catalogo", "codigo")
+        unique_together = ("version", "codigo")
 
     def save(self, *args, **kwargs):
         if not self.codigo and self.nombre:
