@@ -1,5 +1,11 @@
 import json
 from decimal import Decimal, InvalidOperation
+from io import BytesIO
+
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font, PatternFill
+from django.db.models import Count, Max
+from django.utils.text import slugify
 
 from django.db import transaction
 from django.utils.text import slugify
@@ -8,11 +14,13 @@ from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from django.http import HttpResponse
 from apps.utils.pagination import StandardResultsSetPagination
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 
 from apps.misc.api.models.dynamicTechnicalConfig.index import (
     CatalogoTecnico,
+    CatalogoTecnicoVersion,
     CampoTecnicoMuestra,
     CatalogoTecnicoCampo,
     CatalogoTecnicoItem,
@@ -31,6 +39,7 @@ from apps.misc.api.serializers.dynamicTechnicalConfig.index import (
     CatalogoTecnicoItemSerializer,
     CatalogoTecnicoItemValorSerializer,
     CatalogoTecnicoSerializer,
+    CatalogoTecnicoVersionSerializer,
     CampoTecnicoMuestraSerializer,
     EscalaComparacionItemSerializer,
     EscalaComparacionSerializer,
@@ -93,7 +102,7 @@ class CatalogoTecnicoViewSet(SoftDeleteViewSet):
     ordering_fields = ["orden", "nombre", "codigo", "created_at"]
 
     def get_queryset(self):
-        self.queryset = CatalogoTecnico.objects.prefetch_related("campos", "items__valores")
+        self.queryset = CatalogoTecnico.objects.prefetch_related("campos", "versiones", "items__valores")
         queryset = super().get_queryset()
         tipo_muestra = self.request.query_params.get("tipo_muestra")
         requerido = self.request.query_params.get("es_requerido_en_muestra")
@@ -102,6 +111,13 @@ class CatalogoTecnicoViewSet(SoftDeleteViewSet):
         if requerido is not None:
             queryset = queryset.filter(es_requerido_en_muestra=requerido.lower() == "true")
         return queryset
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        catalogo = serializer.save()
+        version = CatalogoTecnicoVersion.objects.create(catalogo=catalogo, numero=1, nombre="Versión inicial")
+        catalogo.version_actual = version
+        catalogo.save(update_fields=["version_actual", "updated_at"])
 
     @action(detail=False, methods=["get"], url_path="sample-form")
     def sample_form(self, request):
@@ -118,6 +134,41 @@ class CatalogoTecnicoViewSet(SoftDeleteViewSet):
             )
         fields = fields.order_by("tipo_muestra", "orden", "nombre_visible")
         return Response(CampoTecnicoMuestraSerializer(fields, many=True).data)
+
+
+class CatalogoTecnicoVersionViewSet(SoftDeleteViewSet):
+    permission_action_map = {
+        "list": "catalogos_tecnicos.ver", "retrieve": "catalogos_tecnicos.ver",
+        "create": "catalogos_tecnicos.crear", "update": "catalogos_tecnicos.editar",
+        "partial_update": "catalogos_tecnicos.editar", "destroy": "catalogos_tecnicos.eliminar",
+        "restore": "catalogos_tecnicos.restaurar",
+    }
+    serializer_class = CatalogoTecnicoVersionSerializer
+    search_fields = ["nombre", "norma_referencia", "notas"]
+    ordering_fields = ["numero", "fecha_vigencia", "created_at"]
+
+    def get_queryset(self):
+        self.queryset = CatalogoTecnicoVersion.objects.annotate(items_count=Count("items"))
+        queryset = super().get_queryset()
+        catalogo = self.request.query_params.get("catalogo")
+        return queryset.filter(catalogo_id=catalogo) if catalogo else queryset
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        catalogo = serializer.validated_data["catalogo"]
+        numero = serializer.validated_data.get("numero")
+        if not numero:
+            numero = (CatalogoTecnicoVersion.objects.filter(catalogo=catalogo).aggregate(maximo=Max("numero"))["maximo"] or 0) + 1
+        version = serializer.save(numero=numero)
+        catalogo.version_actual = version
+        catalogo.save(update_fields=["version_actual", "updated_at"])
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        version = serializer.save()
+        if self.request.data.get("hacer_actual") in [True, "true", "True", "1"]:
+            version.catalogo.version_actual = version
+            version.catalogo.save(update_fields=["version_actual", "updated_at"])
 
 
 class CampoTecnicoMuestraViewSet(SoftDeleteViewSet):
@@ -179,8 +230,10 @@ class CatalogoTecnicoItemViewSet(SoftDeleteViewSet):
         "partial_update": "catalogos_tecnicos.editar",
         "destroy": "catalogos_tecnicos.eliminar",
         "restore": "catalogos_tecnicos.restaurar",
+        "import_excel": "catalogos_tecnicos.crear",
+        "template_excel": "catalogos_tecnicos.ver",
     }
-    queryset = CatalogoTecnicoItem.objects.select_related("catalogo").prefetch_related("valores__campo")
+    queryset = CatalogoTecnicoItem.objects.select_related("catalogo", "version").prefetch_related("valores__campo")
     serializer_class = CatalogoTecnicoItemSerializer
     search_fields = ["nombre", "codigo", "catalogo__nombre"]
     ordering_fields = ["nombre", "codigo", "created_at"]
@@ -188,12 +241,91 @@ class CatalogoTecnicoItemViewSet(SoftDeleteViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         catalogo = self.request.query_params.get("catalogo")
+        version = self.request.query_params.get("version")
         catalogo_codigo = self.request.query_params.get("catalogo_codigo")
         if catalogo:
             queryset = queryset.filter(catalogo_id=catalogo)
+        if version:
+            queryset = queryset.filter(version_id=version)
         if catalogo_codigo:
             queryset = queryset.filter(catalogo__codigo=catalogo_codigo)
         return queryset.order_by("nombre", "id")
+
+    @action(detail=False, methods=["post"], url_path="import-excel")
+    @transaction.atomic
+    def import_excel(self, request):
+        version_id = request.data.get("version")
+        upload = request.FILES.get("archivo")
+        if not version_id or not upload:
+            return Response({"detail": "Seleccione la versión y un archivo Excel."}, status=status.HTTP_400_BAD_REQUEST)
+        if not upload.name.lower().endswith(".xlsx"):
+            return Response({"detail": "El archivo debe tener extensión .xlsx."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            version = CatalogoTecnicoVersion.objects.select_related("catalogo").get(pk=version_id, deleted_at__isnull=True)
+            workbook = load_workbook(BytesIO(upload.read()), read_only=True, data_only=True)
+            sheet = workbook.active
+        except (CatalogoTecnicoVersion.DoesNotExist, ValueError, OSError) as exc:
+            return Response({"detail": f"No se pudo leer el archivo o la versión: {exc}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        headers = [str(cell.value or "").strip().lower() for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+        required = {"nombre", "codigo", "descripcion"}
+        if not required.issubset(set(headers)):
+            return Response({"detail": "La primera fila debe contener: nombre, codigo, descripcion."}, status=status.HTTP_400_BAD_REQUEST)
+        positions = {name: headers.index(name) for name in required}
+        created = updated = 0
+        errors = []
+        for number, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+            nombre = str(row[positions["nombre"]] or "").strip()
+            codigo = slugify(str(row[positions["codigo"]] or nombre)).replace("-", "_")
+            descripcion = str(row[positions["descripcion"]] or "").strip()
+            if not nombre:
+                if any(value not in (None, "") for value in row): errors.append({"fila": number, "error": "El nombre es obligatorio."})
+                continue
+            if not codigo:
+                errors.append({"fila": number, "error": "El código no es válido."})
+                continue
+            item, is_created = CatalogoTecnicoItem.objects.update_or_create(
+                version=version, codigo=codigo,
+                defaults={"catalogo": version.catalogo, "nombre": nombre, "descripcion": descripcion, "activo": True, "deleted_at": None},
+            )
+            created += int(is_created)
+            updated += int(not is_created)
+        if errors:
+            transaction.set_rollback(True)
+            return Response({"detail": "La importación no se aplicó.", "errores": errors[:50]}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"creados": created, "actualizados": updated, "total": created + updated})
+
+    @action(detail=False, methods=["get"], url_path="template-excel")
+    def template_excel(self, request):
+        """Genera la plantilla oficial para evitar archivos con columnas ambiguas."""
+        version_id = request.query_params.get("version")
+        if not version_id:
+            return Response({"detail": "Seleccione una versión para descargar la plantilla."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            version = CatalogoTecnicoVersion.objects.select_related("catalogo").get(pk=version_id, deleted_at__isnull=True)
+        except CatalogoTecnicoVersion.DoesNotExist:
+            return Response({"detail": "La versión seleccionada no existe."}, status=status.HTTP_404_NOT_FOUND)
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Ítems"
+        headers = ["nombre", "codigo", "descripcion"]
+        sheet.append(headers)
+        sheet.append(["Ejemplo de ítem", "ejemplo_item", "Descripción opcional del ítem"])
+        header_fill = PatternFill("solid", fgColor="E9232D")
+        for cell in sheet[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = header_fill
+        sheet.freeze_panes = "A2"
+        sheet.column_dimensions["A"].width = 34
+        sheet.column_dimensions["B"].width = 28
+        sheet.column_dimensions["C"].width = 56
+        stream = BytesIO()
+        workbook.save(stream)
+        filename = f"plantilla_{slugify(version.catalogo.codigo)}_v{version.numero}.xlsx"
+        response = HttpResponse(stream.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 class CatalogoTecnicoItemValorViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
@@ -304,6 +436,8 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
         "restore": "valores_limite.editar_matriz",
         "generate_fields": "valores_limite.editar_matriz",
         "configure": "valores_limite.editar_matriz",
+        "matrix_template": "valores_limite.ver",
+        "import_matrix": "valores_limite.editar_matriz",
     }
     queryset = PruebaFuenteLimite.objects.select_related("prueba", "catalogo_fuente", "campo_tecnico_muestra", "campo_tecnico_muestra__catalogo").prefetch_related(
         "catalogos_configurados__catalogo",
@@ -344,6 +478,54 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
             evaluacion_opciones=request.data.get("evaluacion_opciones"),
         )
         return Response(PruebaLimiteCampoSerializer(fields, many=True).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="matrix-template")
+    def matrix_template(self, request, pk=None):
+        source = self.get_object()
+        workbook = Workbook(); sheet = workbook.active; sheet.title = "Matriz de limites"
+        headers = ["criterio_codigo", "campo_codigo", "operacion", "usa_semaforo", "min_critico", "min_aceptable", "max_aceptable", "max_critico", "valor_objetivo", "valores_permitidos", "comentario"]
+        sheet.append(headers)
+        for cell in sheet[1]: cell.font = Font(bold=True, color="FFFFFF"); cell.fill = PatternFill("solid", fgColor="E9232D")
+        fields = (source.configuracion_regla or {}).get("campos", [])
+        for criterion in source.criterios.filter(activo=True, deleted_at__isnull=True):
+            for field in fields:
+                if field.get("origen_limite") != "catalogo": continue
+                rule = (criterion.valores_limite or {}).get(field.get("codigo"), {})
+                if not isinstance(rule, dict): rule = {"valor_esperado": rule}
+                sheet.append([criterion.codigo, field.get("codigo"), rule.get("operador", field.get("operador", "max")), "SI" if rule.get("usar_amarillo") else "NO", rule.get("min_critico", "NA"), rule.get("min_aceptable", "NA"), rule.get("max_aceptable", "NA"), rule.get("max_critico", "NA"), rule.get("valor_esperado", "NA"), "NA", ""])
+        sheet.freeze_panes = "A2"
+        for col, width in zip("ABCDEFGHIJK", [26, 28, 16, 16, 18, 18, 18, 18, 22, 28, 38]): sheet.column_dimensions[col].width = width
+        stream = BytesIO(); workbook.save(stream)
+        response = HttpResponse(stream.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        response["Content-Disposition"] = f'attachment; filename="matriz_limites_{source.prueba_id}.xlsx"'
+        return response
+
+    @action(detail=True, methods=["post"], url_path="import-matrix")
+    @transaction.atomic
+    def import_matrix(self, request, pk=None):
+        source = self.get_object(); upload = request.FILES.get("archivo")
+        if not upload or not upload.name.lower().endswith(".xlsx"): return Response({"detail": "Cargue la plantilla .xlsx."}, status=status.HTTP_400_BAD_REQUEST)
+        try: sheet = load_workbook(BytesIO(upload.read()), read_only=True, data_only=True).active
+        except Exception: return Response({"detail": "No se pudo leer el archivo Excel."}, status=status.HTTP_400_BAD_REQUEST)
+        headers = [str(c.value or "").strip() for c in next(sheet.iter_rows(min_row=1, max_row=1))]
+        required = ["criterio_codigo", "campo_codigo", "operacion", "usa_semaforo", "min_critico", "min_aceptable", "max_aceptable", "max_critico", "valor_objetivo", "valores_permitidos"]
+        if any(name not in headers for name in required): return Response({"detail": "La plantilla no contiene todas las columnas requeridas."}, status=status.HTTP_400_BAD_REQUEST)
+        pos = {name: headers.index(name) for name in headers}; fields = {f.get("codigo"): f for f in (source.configuracion_regla or {}).get("campos", []) if f.get("origen_limite") == "catalogo"}; criteria = {c.codigo: c for c in source.criterios.filter(activo=True, deleted_at__isnull=True)}; errors=[]; updates=[]
+        allowed = {"max", "min", "between", "eq", "neq", "in", "not_in", "informativo"}
+        for row_number, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), 2):
+            code, field_code = str(row[pos["criterio_codigo"]] or "").strip(), str(row[pos["campo_codigo"]] or "").strip()
+            if not code and not field_code: continue
+            operation = str(row[pos["operacion"]] or "").strip().lower()
+            if code not in criteria or field_code not in fields or operation not in allowed: errors.append({"fila": row_number, "error": "Criterio, campo u operación no válida."}); continue
+            val=lambda name: None if str(row[pos[name]] or "").strip().upper() in {"", "NA"} else str(row[pos[name]]).strip()
+            rule={"operador": operation, "usar_amarillo": str(row[pos["usa_semaforo"]] or "").strip().upper() == "SI", "min_critico": val("min_critico"), "min_aceptable": val("min_aceptable"), "max_aceptable": val("max_aceptable"), "max_critico": val("max_critico"), "valor_esperado": val("valor_objetivo") or val("valores_permitidos")}
+            needed = {"max":["max_aceptable"], "min":["min_aceptable"], "between":["min_aceptable","max_aceptable"], "eq":["valor_esperado"], "neq":["valor_esperado"], "in":["valor_esperado"], "not_in":["valor_esperado"], "informativo":[]}[operation]
+            if any(rule[key] is None for key in needed): errors.append({"fila": row_number, "error": "Faltan valores requeridos para la operación."}); continue
+            updates.append((criteria[code], field_code, rule))
+        if errors: transaction.set_rollback(True); return Response({"detail":"La importación no se aplicó.","errores":errors[:100]}, status=status.HTTP_400_BAD_REQUEST)
+        for criterion, field_code, rule in updates:
+            values = criterion.valores_limite or {}; values[field_code] = rule; criterion.valores_limite = values; criterion.save(update_fields=["valores_limite", "updated_at"])
+        return Response({"actualizados": len(updates)})
 
     @action(detail=False, methods=["post"], url_path="configure")
     @transaction.atomic

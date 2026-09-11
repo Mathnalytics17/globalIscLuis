@@ -1,6 +1,7 @@
 from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
 import json
+from copy import copy
 from django.utils.text import slugify
 
 from apps.misc.api.models.dynamicTechnicalConfig.index import (
@@ -613,6 +614,12 @@ def _matching_limit_fields(prueba_muestra, resultado=None, division=None, compon
 
 
 def _status_payload_from_field(value, field, configured_value):
+    # Las reglas provenientes de catálogo pueden definir un operador por ítem.
+    # No mutamos el campo persistido: solo construimos la evaluación contextual.
+    parsed_rule = _parse_rule(configured_value)
+    if parsed_rule and parsed_rule.get("operador"):
+        field = copy(field)
+        field.operador = parsed_rule["operador"]
     semaphore = _evaluate_semaphore_rule(value, field, configured_value)
     if semaphore is not None:
         return semaphore
