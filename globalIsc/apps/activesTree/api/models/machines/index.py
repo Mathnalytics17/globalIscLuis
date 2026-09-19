@@ -4,6 +4,7 @@ from apps.misc.api.models.companies.index import Empresa
 
 class Maquina(models.Model):
     nombre = models.CharField(max_length=255)
+    descripcion = models.TextField(blank=True, null=True)
     componente = models.CharField(max_length=255, blank=True, null=True)
     tipoAceite = models.CharField(max_length=255, blank=True, null=True)
     

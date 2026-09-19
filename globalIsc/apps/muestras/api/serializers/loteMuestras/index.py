@@ -5,6 +5,7 @@ from django.db.models import Q
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.muestras.index import Muestra
 from apps.activesTree.api.models.machines.index import Maquina
+from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, PuntoMuestreo
 from apps.users.api.models.index import User
 from apps.muestras.api.serializers.muestras.index import MuestraListSerializer, MuestraSerializer
 from apps.misc.api.serializers.tipoGestionMuestra.index import TipoGestionMuestraSerializer
@@ -16,6 +17,9 @@ from apps.muestras.api.services.workflow import capabilities_for_batch
 
 class MuestraLoteCreateSerializer(serializers.ModelSerializer):
     atributos_tecnicos = MuestraAtributoTecnicoSerializer(many=True, required=False)
+    punto_muestreo = serializers.PrimaryKeyRelatedField(
+        queryset=PuntoMuestreo.objects.filter(activo=True), required=False, write_only=True
+    )
     class Meta:
         model = Muestra
         fields = [
@@ -27,6 +31,7 @@ class MuestraLoteCreateSerializer(serializers.ModelSerializer):
             "contacto_cliente",
             "equipo_placa",
             "referencia_equipo",
+            "punto_muestreo",
             "periodo_servicio_aceite",
             "unidad_periodo_aceite",
             "periodo_servicio_equipo",
@@ -43,11 +48,19 @@ class MuestraLoteCreateSerializer(serializers.ModelSerializer):
         condicion = attrs.get("condicion")
 
         referencia_equipo = attrs.get("referencia_equipo")
+        punto_muestreo = attrs.get("punto_muestreo")
         equipo_placa = attrs.get("equipo_placa")
 
-        if condicion == "usada" and not referencia_equipo and not equipo_placa:
+        if punto_muestreo:
+            if referencia_equipo and referencia_equipo.pk != punto_muestreo.maquina_id:
+                raise serializers.ValidationError({"punto_muestreo": "El punto no pertenece a la máquina indicada."})
+            attrs["referencia_equipo"] = punto_muestreo.maquina
+            attrs["equipo_placa"] = None
+            referencia_equipo = punto_muestreo.maquina
+
+        if condicion == "usada" and not punto_muestreo and not equipo_placa:
             raise serializers.ValidationError({
-                "referencia_equipo": "Una muestra usada debe tener equipo asociado o placa manual."
+                "punto_muestreo": "Una muestra usada debe seleccionar un punto de medida o usar identificación manual."
             })
 
         if tipo_muestra == "aceite":
@@ -241,6 +254,12 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
                 "cliente_ocasional_nombre": "Debe ingresar el nombre del cliente ocasional."
             })
 
+        empresa = attrs.get("cliente_empresa")
+        for muestra in attrs.get("muestras") or []:
+            point = muestra.get("punto_muestreo")
+            if point and empresa and point.maquina.empresa_id != empresa.id:
+                raise serializers.ValidationError({"muestras": "El punto de medida no pertenece a la empresa del lote."})
+
         return attrs
 
     def _resolve_manual_machine(self, lote, muestra_data):
@@ -278,6 +297,7 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
 
         for muestra_data in muestras_data:
             atributos_data = muestra_data.pop("atributos_tecnicos", None)
+            punto_muestreo = muestra_data.pop("punto_muestreo", None)
             muestra_data.pop("fecha_envio", None)
             muestra_data.pop("contacto_cliente", None)
             muestra_data.pop("usuario_registro", None)
@@ -293,6 +313,10 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
             )
             if atributos_data is not None:
                 replace_sample_attributes(muestra, atributos_data)
+            if punto_muestreo:
+                AsignacionPuntoMuestreo.objects.create(
+                    muestra=muestra, punto_muestreo=punto_muestreo, origen='lote', asignado_por=lote.usuario_registro,
+                )
 
         lote.recalcular_estado()
 
@@ -331,6 +355,7 @@ class AddMuestrasToLoteSerializer(serializers.Serializer):
 
         for muestra_data in muestras_data:
             atributos_data = muestra_data.pop("atributos_tecnicos", None)
+            punto_muestreo = muestra_data.pop("punto_muestreo", None)
             muestra_data.pop("fecha_envio", None)
             muestra_data.pop("contacto_cliente", None)
             muestra_data.pop("usuario_registro", None)
@@ -360,6 +385,11 @@ class AddMuestrasToLoteSerializer(serializers.Serializer):
             )
             if atributos_data is not None:
                 replace_sample_attributes(muestra, atributos_data)
+            if punto_muestreo:
+                AsignacionPuntoMuestreo.objects.create(
+                    muestra=muestra, punto_muestreo=punto_muestreo, origen='lote',
+                    asignado_por=request.user if request and request.user.is_authenticated else lote.usuario_registro,
+                )
 
             created_muestras.append(muestra)
 

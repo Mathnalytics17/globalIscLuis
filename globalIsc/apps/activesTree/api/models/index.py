@@ -52,6 +52,11 @@ class PuntoMuestreo(models.Model):
     nombre = models.CharField(max_length=150)
     codigo = models.CharField(max_length=80, blank=True, null=True)
     descripcion = models.TextField(blank=True, null=True)
+    lubricante = models.CharField(max_length=150, blank=True, null=True)
+    frecuencia_cambio = models.PositiveIntegerField(blank=True, null=True)
+    unidad_frecuencia_cambio = models.CharField(max_length=10, default='horas')
+    frecuencia_analisis = models.PositiveIntegerField(blank=True, null=True)
+    unidad_frecuencia_analisis = models.CharField(max_length=10, default='horas')
     activo = models.BooleanField(default=True, db_index=True)
     creado_por = models.ForeignKey(
         'users.User',

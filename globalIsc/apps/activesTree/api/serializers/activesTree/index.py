@@ -43,7 +43,10 @@ class RecursiveFolderSerializer(serializers.ModelSerializer):
                 'codigo_equipo': obj.machine.codigo_equipo,
                 'numero_serie': obj.machine.numero_serie,
                 'componente': obj.machine.componente,
-                'tipoAceite': obj.machine.tipoAceite
+                'tipoAceite': obj.machine.tipoAceite,
+                'frecuenciaCambio': obj.machine.frecuenciaCambio,
+                'frecuenciaAnalisis': obj.machine.frecuenciaAnalisis,
+                'descripcion': obj.machine.descripcion,
             }
         return None
     
@@ -69,6 +72,11 @@ class RecursiveFolderSerializer(serializers.ModelSerializer):
                 'nombre': point.nombre,
                 'codigo': point.codigo,
                 'descripcion': point.descripcion,
+                'lubricante': point.lubricante,
+                'frecuencia_cambio': point.frecuencia_cambio,
+                'unidad_frecuencia_cambio': point.unidad_frecuencia_cambio,
+                'frecuencia_analisis': point.frecuencia_analisis,
+                'unidad_frecuencia_analisis': point.unidad_frecuencia_analisis,
                 'activo': point.activo,
                 'muestras_asociadas': getattr(point, 'muestras_asociadas', 0),
             }
