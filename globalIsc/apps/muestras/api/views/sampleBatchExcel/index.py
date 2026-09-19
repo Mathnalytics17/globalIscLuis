@@ -16,11 +16,12 @@ from rest_framework.response import Response
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 
 from apps.activesTree.api.models.machines.index import Maquina
+from apps.activesTree.api.models.index import PuntoMuestreo
 from apps.misc.api.models.dynamicTechnicalConfig.index import CampoTecnicoMuestra
 from apps.muestras.api.models.sampleBatchExcel.index import SampleBatchExcelTemplateToken
 from apps.users.api.models.index import User
 
-SCHEMA_VERSION = "sample-batch-v4-dynamic-technical-fields"
+SCHEMA_VERSION = "sample-batch-v5-sampling-points"
 TEMPLATE_ROWS = 500
 MAX_IMPORT_ROWS = 5000
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
@@ -36,6 +37,7 @@ COMMON_HEADERS = [
     ("fabricante", "Fabricante"),
     ("referencia_marca", "Referencia / marca"),
     ("referencia_equipo", "Máquina"),
+    ("punto_muestreo", "Punto de medida"),
     ("equipo_placa", "Placa manual"),
     ("periodo_servicio_aceite", "Periodo aceite"),
     ("unidad_periodo_aceite", "Unidad aceite"),
@@ -127,6 +129,7 @@ def write_catalog_sheet(workbook, fields_by_type):
         ("Condiciones", ["usada", "nueva"]),
         ("Unidades", ["horas", "km", "millas", "dias"]),
         ("Maquinas", [machine_label(item) for item in Maquina.objects.all().order_by("id")[:3000]]),
+        ("PuntosMuestreo", [f"{item.pk} | {item.maquina.nombre} | {item.nombre}" for item in PuntoMuestreo.objects.filter(activo=True).select_related('maquina').order_by('maquina__nombre', 'nombre')[:3000]]),
     ]
 
     seen_fields = set()
@@ -178,6 +181,7 @@ def style_sample_sheet(ws, columns, ranges, sample_type, fields_by_type):
     header_index = {key: index for index, (key, _) in enumerate(columns, start=1)}
     add_list_validation(ws, f"{ws.cell(1, header_index['condicion']).column_letter}2:{ws.cell(1, header_index['condicion']).column_letter}{TEMPLATE_ROWS + 1}", ranges["Condiciones"])
     add_list_validation(ws, f"{ws.cell(1, header_index['referencia_equipo']).column_letter}2:{ws.cell(1, header_index['referencia_equipo']).column_letter}{TEMPLATE_ROWS + 1}", ranges["Maquinas"])
+    add_list_validation(ws, f"{ws.cell(1, header_index['punto_muestreo']).column_letter}2:{ws.cell(1, header_index['punto_muestreo']).column_letter}{TEMPLATE_ROWS + 1}", ranges["PuntosMuestreo"])
     for key in ["unidad_periodo_aceite", "unidad_periodo_equipo"]:
         letter = ws.cell(1, header_index[key]).column_letter
         add_list_validation(ws, f"{letter}2:{letter}{TEMPLATE_ROWS + 1}", ranges["Unidades"])
@@ -205,7 +209,7 @@ def generate_template_workbook(token):
     readme["A3"] = "Use la hoja Aceites para muestras de aceite y la hoja Grasas para muestras de grasa."
     readme["A4"] = "Las columnas técnicas reflejan la configuración vigente de Campos técnicos de muestra."
     readme["A5"] = "Si el cliente no conoce un dato y el campo lo permite, seleccione DESCONOCIDO."
-    readme["A6"] = "Para una muestra usada indique una máquina registrada o una placa manual, nunca ambas."
+    readme["A6"] = "Para una muestra usada seleccione el Punto de medida. La máquina se completa automáticamente; use placa manual solo si el equipo no está registrado."
     readme.column_dimensions["A"].width = 130
 
     ranges = write_catalog_sheet(workbook, fields_by_type)
@@ -261,9 +265,13 @@ def parse_row(ws, row, sample_type, fields_by_type):
     columns = template_columns(sample_type, fields_by_type)
     raw = {key: ws.cell(row=row, column=index).value for index, (key, _) in enumerate(columns, start=1)}
     errors = []
+
+    def add_error(message, *fields):
+        """Keep import errors actionable for large spreadsheets."""
+        errors.append({"message": message, "fields": list(fields)})
     condition = normalize_choice(raw["condicion"])
     if condition not in ["usada", "nueva"]:
-        errors.append("Condición debe ser usada o nueva.")
+        add_error("Condición debe ser usada o nueva.", "Condición")
 
     data = {
         "fecha_toma": raw["fecha_toma"],
@@ -278,25 +286,38 @@ def parse_row(ws, row, sample_type, fields_by_type):
         "unidad_periodo_equipo": normalize_choice(raw["unidad_periodo_equipo"]) or "horas",
         "observaciones": str(raw["observaciones"] or "").strip(),
         "referencia_equipo": None,
+        "punto_muestreo": None,
         "campos_adicionales": {"fabricante": str(raw["fabricante"] or "").strip() or None},
         "atributos_tecnicos": {},
     }
 
     if not raw["fecha_toma"]:
-        errors.append("Fecha toma es obligatoria.")
+        add_error("Fecha toma es obligatoria.", "Fecha toma")
     if not data["referencia_marca"]:
-        errors.append("Referencia / marca es obligatoria.")
+        add_error("Referencia / marca es obligatoria.", "Referencia / marca")
 
+    point_id = parse_id(raw["punto_muestreo"])
+    point = PuntoMuestreo.objects.filter(pk=point_id, activo=True).select_related('maquina').first() if point_id and point_id != UNKNOWN_LABEL else None
+    if point_id and not point:
+        add_error(f"Punto de medida inválido ({point_id}).", "Punto de medida")
+    if point:
+        data["punto_muestreo"] = str(point.pk)
+        data["referencia_equipo"] = str(point.maquina_id)
     machine = parse_id(raw["referencia_equipo"])
-    if machine and data["equipo_placa"]:
-        errors.append("Seleccione una máquina registrada o una placa manual, no ambas.")
-    if machine:
+    if point and machine and str(machine) != str(point.maquina_id):
+        add_error("La máquina no corresponde al punto de medida seleccionado.", "Máquina", "Punto de medida")
+    if point and data["equipo_placa"]:
+        add_error(
+            "Hay datos en Punto de medida y Placa manual. Deje solo la columna que identifica esta muestra.",
+            "Punto de medida", "Placa manual",
+        )
+    if machine and not point:
         if Maquina.objects.filter(pk=machine).exists():
             data["referencia_equipo"] = str(machine)
         else:
-            errors.append(f"Máquina inválida ({machine}).")
-    if condition == "usada" and not data["referencia_equipo"] and not data["equipo_placa"]:
-        errors.append("Muestra usada requiere Máquina o Placa manual.")
+            add_error(f"Máquina inválida ({machine}).", "Máquina")
+    if condition == "usada" and not data["punto_muestreo"] and not data["equipo_placa"]:
+        add_error("Muestra usada requiere Punto de medida o Placa manual.", "Punto de medida", "Placa manual")
 
     for field in fields_by_type[sample_type]:
         field_key = technical_column_key(field)
@@ -313,11 +334,11 @@ def parse_row(ws, row, sample_type, fields_by_type):
 
         item = None if unknown else active_items.filter(pk=item_id).first()
         if item_id and not unknown and not item:
-            errors.append(f"{label}: opción inválida ({item_id}).")
+            add_error(f"{label}: opción inválida ({item_id}).", label)
         if unknown and not allows_unknown:
-            errors.append(f"{label}: el campo no permite DESCONOCIDO.")
+            add_error(f"{label}: el campo no permite DESCONOCIDO.", label)
         if field.obligatorio and not item and not unknown:
-            errors.append(f"{label}: seleccione una opción.")
+            add_error(f"{label}: seleccione una opción.", label)
 
         data["atributos_tecnicos"][str(catalog.id)] = {
             "item": str(item.id) if item else "",

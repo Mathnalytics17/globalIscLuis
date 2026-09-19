@@ -8,6 +8,8 @@ from apps.users.api.models.index import User
 
 class MaquinaSerializer(serializers.ModelSerializer):
     empresa_info = serializers.SerializerMethodField(read_only=True)
+    ubicacion_activo = serializers.SerializerMethodField(read_only=True)
+    puntos_muestreo_activos = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Maquina
@@ -24,6 +26,31 @@ class MaquinaSerializer(serializers.ModelSerializer):
             'email': obj.empresa.email,
             'is_active': obj.empresa.is_active,
         }
+
+    def get_ubicacion_activo(self, obj):
+        """Expose the asset-tree path so the machines list identifies its draga/folder."""
+        folder = obj.maquina_folder.select_related('compania').order_by('id').first()
+        if not folder:
+            return ''
+        folders_by_id = {
+            str(item.id): item
+            for item in Carpeta.objects.filter(compania_id=obj.empresa_id).only('id', 'nombre', 'id_parent_node')
+        }
+        parts = []
+        parent_id = str(folder.id_parent_node)
+        visited = set()
+        while parent_id and parent_id != '-1' and parent_id not in visited:
+            visited.add(parent_id)
+            parent = folders_by_id.get(parent_id)
+            if not parent:
+                break
+            parts.append(parent.nombre)
+            parent_id = str(parent.id_parent_node)
+        return ' / '.join(reversed(parts))
+
+    def get_puntos_muestreo_activos(self, obj):
+        """Count points here so every Machines view can expose the real sampling setup."""
+        return obj.puntos_muestreo.filter(activo=True).count()
 
 
 class MaquinaConMuestrasSerializer(MaquinaSerializer):
@@ -68,14 +95,16 @@ class CarpetaSerializer(serializers.ModelSerializer):
 
 class PuntoMuestreoSerializer(serializers.ModelSerializer):
     maquina_nombre = serializers.CharField(source='maquina.nombre', read_only=True)
+    maquina_codigo = serializers.CharField(source='maquina.codigo_equipo', read_only=True)
     empresa_id = serializers.IntegerField(source='maquina.empresa_id', read_only=True)
     muestras_asociadas = serializers.SerializerMethodField()
 
     class Meta:
         model = PuntoMuestreo
         fields = [
-            'id', 'maquina', 'maquina_nombre', 'empresa_id', 'nombre', 'codigo',
-            'descripcion', 'activo', 'muestras_asociadas', 'creado_por',
+            'id', 'maquina', 'maquina_nombre', 'maquina_codigo', 'empresa_id', 'nombre', 'codigo',
+            'descripcion', 'lubricante', 'frecuencia_cambio', 'unidad_frecuencia_cambio',
+            'frecuencia_analisis', 'unidad_frecuencia_analisis', 'activo', 'muestras_asociadas', 'creado_por',
             'creado_en', 'actualizado_en',
         ]
         read_only_fields = ['creado_por', 'creado_en', 'actualizado_en']
