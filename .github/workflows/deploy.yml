@@ -40,7 +40,9 @@ jobs:
                       git switch master
                       git reset --hard origin/master
 
-                      docker compose -f docker-compose.prod.yml up -d --build web daphne
+                      docker compose -f docker-compose.prod.yml up -d --build --force-recreate web daphne
+
+                      docker compose -f docker-compose.prod.yml restart nginx
 
                       echo "Waiting for backend health check..."
 
