@@ -1,0 +1,45 @@
+name: Backend Deploy
+
+on:
+    workflow_run:
+        workflows:
+            - Backend CI
+        types:
+            - completed
+        branches:
+            - master
+
+concurrency:
+    group: backend-production
+    cancel-in-progress: false
+
+jobs:
+    deploy:
+        name: deploy-production
+
+        if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+        runs-on: ubuntu-latest
+        environment: production
+
+        steps:
+            - name: Deploy backend
+              uses: appleboy/ssh-action@v1.2.5
+              with:
+                  host: ${{ secrets.SSH_HOST }}
+                  username: ${{ secrets.SSH_USER }}
+                  key: ${{ secrets.SSH_PRIVATE_KEY }}
+                  port: ${{ secrets.SSH_PORT }}
+
+                  script: |
+                      set -e
+
+                      cd /root/globalOil/backend
+
+                      git fetch origin master
+                      git switch master
+                      git reset --hard origin/master
+
+                      docker compose -f docker-compose.prod.yml up -d --build web daphne
+
+                      docker compose -f docker-compose.prod.yml ps
