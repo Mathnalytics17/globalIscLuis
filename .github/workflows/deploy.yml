@@ -42,4 +42,24 @@ jobs:
 
                       docker compose -f docker-compose.prod.yml up -d --build web daphne
 
+                      echo "Waiting for backend health check..."
+
+                      for i in $(seq 1 20); do
+                        if docker compose -f docker-compose.prod.yml exec -T web \
+                          python -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5); print(r.read().decode()); assert r.status == 200"; then
+
+                          echo "Backend is healthy."
+                          break
+                        fi
+
+                        if [ "$i" -eq 20 ]; then
+                          echo "Backend health check failed."
+                          docker compose -f docker-compose.prod.yml logs --tail=100 web
+                          exit 1
+                        fi
+
+                        echo "Attempt $i/20 failed. Retrying in 3 seconds..."
+                        sleep 3
+                      done
+
                       docker compose -f docker-compose.prod.yml ps
