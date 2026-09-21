@@ -46,7 +46,7 @@ jobs:
 
                       for i in $(seq 1 20); do
                         if docker compose -f docker-compose.prod.yml exec -T web \
-                          python -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5); print(r.read().decode()); assert r.status == 200"; then
+                          python -c "import urllib.request; req=urllib.request.Request('http://127.0.0.1:8000/api/health/', headers={'Host':'muestraslubricantesglobal.com'}); r=urllib.request.urlopen(req, timeout=5); print(r.read().decode()); assert r.status == 200"; then
 
                           echo "Backend is healthy."
                           break
