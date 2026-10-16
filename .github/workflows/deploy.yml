@@ -40,7 +40,9 @@ jobs:
                       git switch master
                       git reset --hard origin/master
 
-                      docker compose -f docker-compose.prod.yml up -d --build --force-recreate web daphne
+                      # Recreate only this project's application services and
+                      # remove containers left by retired Compose services.
+                      docker compose -f docker-compose.prod.yml up -d --build --force-recreate --remove-orphans web daphne
 
                       docker compose -f docker-compose.prod.yml restart nginx
 
@@ -65,3 +67,17 @@ jobs:
                       done
 
                       docker compose -f docker-compose.prod.yml ps
+
+                      # Keep the Docker host bounded without ever pruning volumes.
+                      # postgres_data, redis_data and /apps/media are persistent
+                      # application data and are deliberately not touched here.
+                      # Retaining seven days allows quick rollbacks while removing
+                      # obsolete images and BuildKit cache from old deployments.
+                      retention="${DOCKER_PRUNE_UNTIL:-168h}"
+                      echo "Docker usage before cleanup:"
+                      docker system df || true
+                      docker container prune --force --filter "until=${retention}" || true
+                      docker image prune --all --force --filter "until=${retention}" || true
+                      docker builder prune --all --force --filter "until=${retention}" || true
+                      echo "Docker usage after cleanup:"
+                      docker system df || true

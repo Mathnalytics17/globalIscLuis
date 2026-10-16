@@ -34,6 +34,7 @@ class PruebaMuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         'condicion_catalogo',
         'condicion_catalogo__unidad',
         'lote_predefinido',
+        'fuente_limite',
         'criterio_evaluacion',
         'criterio_evaluacion__fuente_limite',
         'criterio_limite_catalogo',

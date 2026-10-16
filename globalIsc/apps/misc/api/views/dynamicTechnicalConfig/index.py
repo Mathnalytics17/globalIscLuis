@@ -3,11 +3,9 @@ from decimal import Decimal, InvalidOperation
 from io import BytesIO
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Max
-from django.utils.text import slugify
-
-from django.db import transaction
 from django.utils.text import slugify
 from django.utils import timezone
 from rest_framework import filters, status, viewsets
@@ -260,12 +258,19 @@ class CatalogoTecnicoItemViewSet(SoftDeleteViewSet):
             return Response({"detail": "Seleccione la versión y un archivo Excel."}, status=status.HTTP_400_BAD_REQUEST)
         if not upload.name.lower().endswith(".xlsx"):
             return Response({"detail": "El archivo debe tener extensión .xlsx."}, status=status.HTTP_400_BAD_REQUEST)
+        if upload.size > 10 * 1024 * 1024:
+            return Response({"detail": "El archivo no puede superar 10 MB."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             version = CatalogoTecnicoVersion.objects.select_related("catalogo").get(pk=version_id, deleted_at__isnull=True)
             workbook = load_workbook(BytesIO(upload.read()), read_only=True, data_only=True)
+            if len(workbook.worksheets) > 20:
+                return Response({"detail": "El archivo no puede tener más de 20 hojas."}, status=status.HTTP_400_BAD_REQUEST)
             sheet = workbook.active
-        except (CatalogoTecnicoVersion.DoesNotExist, ValueError, OSError) as exc:
-            return Response({"detail": f"No se pudo leer el archivo o la versión: {exc}"}, status=status.HTTP_400_BAD_REQUEST)
+        except (CatalogoTecnicoVersion.DoesNotExist, ValueError, OSError):
+            return Response({"detail": "No se pudo leer el archivo o la versión."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if sheet.max_row > 5001:
+            return Response({"detail": "El archivo no puede superar 5.000 filas de datos."}, status=status.HTTP_400_BAD_REQUEST)
 
         headers = [str(cell.value or "").strip().lower() for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
         required = {"nombre", "codigo", "descripcion"}
@@ -429,15 +434,18 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
         "list": "valores_limite.ver",
         "retrieve": "valores_limite.ver",
         "resolve_preview": "valores_limite.ver",
-        "create": "valores_limite.editar_matriz",
+        "versions": "valores_limite.ver",
+        "activate": "valores_limite.activar_version",
+        "deactivate": "valores_limite.desactivar_version",
+        "create": "valores_limite.crear_version",
         "update": "valores_limite.editar_matriz",
         "partial_update": "valores_limite.editar_matriz",
         "destroy": "valores_limite.editar_matriz",
         "restore": "valores_limite.editar_matriz",
         "generate_fields": "valores_limite.editar_matriz",
-        "configure": "valores_limite.editar_matriz",
+        "configure": "valores_limite.crear_version",
         "matrix_template": "valores_limite.ver",
-        "import_matrix": "valores_limite.editar_matriz",
+        "import_matrix": "valores_limite.importar_matriz",
     }
     queryset = PruebaFuenteLimite.objects.select_related("prueba", "catalogo_fuente", "campo_tecnico_muestra", "campo_tecnico_muestra__catalogo").prefetch_related(
         "catalogos_configurados__catalogo",
@@ -453,7 +461,8 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
     ordering_fields = ["prioridad", "prueba", "created_at"]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        # Assignment can deliberately use a historical, published version.
+        queryset = self.queryset.all() if self.request.query_params.get("historial") in {"1", "true", "True"} else super().get_queryset()
         prueba = self.request.query_params.get("prueba")
         catalogo = self.request.query_params.get("catalogo_fuente")
         if prueba:
@@ -461,6 +470,58 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
         if catalogo:
             queryset = queryset.filter(catalogo_fuente_id=catalogo)
         return queryset
+
+    @action(detail=False, methods=["get"], url_path="versions")
+    def versions(self, request):
+        """Return the complete selectable history for one test, newest first."""
+        prueba_id = request.query_params.get("prueba")
+        if not prueba_id:
+            return Response({"detail": "Indique la prueba."}, status=status.HTTP_400_BAD_REQUEST)
+        queryset = PruebaFuenteLimite.objects.filter(prueba_id=prueba_id).select_related(
+            "prueba", "catalogo_fuente", "campo_tecnico_muestra", "campo_tecnico_muestra__catalogo"
+        ).prefetch_related(
+            "catalogos_configurados__catalogo",
+            "catalogos_configurados__campo_tecnico_muestra",
+            "criterios__selecciones_catalogo__catalogo",
+            "criterios__selecciones_catalogo__item",
+            "campos_limite__resultado",
+            "campos_limite__division",
+            "campos_limite__componente",
+        ).order_by("-version", "-id")
+        return Response(self.get_serializer(queryset, many=True).data)
+
+    def _version_object(self, pk):
+        return PruebaFuenteLimite.objects.filter(pk=pk).first()
+
+    @action(detail=True, methods=["post"], url_path="activate")
+    @transaction.atomic
+    def activate(self, request, pk=None):
+        source = self._version_object(pk)
+        if not source:
+            return Response({"detail": "La versión solicitada no existe."}, status=status.HTTP_404_NOT_FOUND)
+        # Exactly one default version per test. Assigned sample tests retain
+        # their own source foreign key and are intentionally not touched.
+        PruebaFuenteLimite.objects.filter(prueba_id=source.prueba_id).exclude(pk=source.pk).update(activo=False)
+        source.activo = True
+        source.publicada = True
+        source.deleted_at = None
+        source.save(update_fields=["activo", "publicada", "deleted_at", "updated_at"])
+        return Response(self.get_serializer(source).data)
+
+    @action(detail=True, methods=["post"], url_path="deactivate")
+    @transaction.atomic
+    def deactivate(self, request, pk=None):
+        source = self._version_object(pk)
+        if not source:
+            return Response({"detail": "La versión solicitada no existe."}, status=status.HTTP_404_NOT_FOUND)
+        if source.activo:
+            return Response(
+                {"detail": "No puede desactivar la versión vigente. Active primero otra versión."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        source.publicada = False
+        source.save(update_fields=["publicada", "updated_at"])
+        return Response(self.get_serializer(source).data)
 
     @action(detail=True, methods=["post"], url_path="generate-fields")
     @transaction.atomic
@@ -495,6 +556,29 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
                 sheet.append([criterion.codigo, field.get("codigo"), rule.get("operador", field.get("operador", "max")), "SI" if rule.get("usar_amarillo") else "NO", rule.get("min_critico", "NA"), rule.get("min_aceptable", "NA"), rule.get("max_aceptable", "NA"), rule.get("max_critico", "NA"), rule.get("valor_esperado", "NA"), "NA", ""])
         sheet.freeze_panes = "A2"
         for col, width in zip("ABCDEFGHIJK", [26, 28, 16, 16, 18, 18, 18, 18, 22, 28, 38]): sheet.column_dimensions[col].width = width
+        guide = workbook.create_sheet("Guía")
+        guide.append(["Cómo completar la matriz de límites"])
+        guide["A1"].font = Font(bold=True, color="FFFFFF", size=14)
+        guide["A1"].fill = PatternFill("solid", fgColor="E9232D")
+        guide.merge_cells("A1:C1")
+        guide.append(["Columna", "Qué se debe escribir", "Cuándo aplica"])
+        guidance = [
+            ("criterio_codigo", "Código de la combinación de catálogo; no lo modifique.", "Siempre"),
+            ("campo_codigo", "Código técnico del campo; no lo modifique.", "Siempre"),
+            ("operacion", "max, min, between, eq, neq, in, not_in o informativo.", "Siempre"),
+            ("usa_semaforo", "SI para advertencia amarilla; NO para pasar de aceptable a crítico.", "Operaciones max, min o between"),
+            ("min_critico / min_aceptable", "Límites inferiores. Use NA cuando no apliquen.", "min o between"),
+            ("max_aceptable / max_critico", "Límites superiores. El valor 0 es válido. Use NA cuando no aplique.", "max o between"),
+            ("valor_objetivo", "Valor esperado o lista separada por punto y coma.", "eq, neq, in o not_in"),
+            ("valores_permitidos", "Alternativa de valor_objetivo para listas.", "in o not_in"),
+            ("comentario", "Referencia o explicación para el equipo; no cambia el cálculo.", "Opcional"),
+        ]
+        for row in guidance: guide.append(row)
+        guide.freeze_panes = "A3"
+        for col, width in zip("ABC", [30, 78, 34]): guide.column_dimensions[col].width = width
+        for row in guide.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
         stream = BytesIO(); workbook.save(stream)
         response = HttpResponse(stream.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         response["Content-Disposition"] = f'attachment; filename="matriz_limites_{source.prueba_id}.xlsx"'
@@ -517,10 +601,17 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
             if not code and not field_code: continue
             operation = str(row[pos["operacion"]] or "").strip().lower()
             if code not in criteria or field_code not in fields or operation not in allowed: errors.append({"fila": row_number, "error": "Criterio, campo u operación no válida."}); continue
-            val=lambda name: None if str(row[pos[name]] or "").strip().upper() in {"", "NA"} else str(row[pos[name]]).strip()
+            def val(name):
+                raw = row[pos[name]]
+                if raw is None:
+                    return None
+                text = str(raw).strip()
+                return None if text.upper() in {"", "NA"} else text
             rule={"operador": operation, "usar_amarillo": str(row[pos["usa_semaforo"]] or "").strip().upper() == "SI", "min_critico": val("min_critico"), "min_aceptable": val("min_aceptable"), "max_aceptable": val("max_aceptable"), "max_critico": val("max_critico"), "valor_esperado": val("valor_objetivo") or val("valores_permitidos")}
             needed = {"max":["max_aceptable"], "min":["min_aceptable"], "between":["min_aceptable","max_aceptable"], "eq":["valor_esperado"], "neq":["valor_esperado"], "in":["valor_esperado"], "not_in":["valor_esperado"], "informativo":[]}[operation]
-            if any(rule[key] is None for key in needed): errors.append({"fila": row_number, "error": "Faltan valores requeridos para la operación."}); continue
+            if any(rule[key] is None for key in needed):
+                missing = ", ".join(key for key in needed if rule[key] is None)
+                errors.append({"fila": row_number, "columna": missing, "error": f"Complete: {missing}."}); continue
             updates.append((criteria[code], field_code, rule))
         if errors: transaction.set_rollback(True); return Response({"detail":"La importación no se aplicó.","errores":errors[:100]}, status=status.HTTP_400_BAD_REQUEST)
         for criterion, field_code, rule in updates:
@@ -531,6 +622,16 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
     @transaction.atomic
     def configure(self, request):
         """Guarda la configuración completa de evaluación de una prueba en una transacción."""
+        idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip() or None
+        if idempotency_key:
+            existing = PruebaFuenteLimite.objects.filter(idempotency_key=idempotency_key).first()
+            if existing:
+                if str(existing.prueba_id) != str(request.data.get("prueba")):
+                    return Response(
+                        {"detail": "La clave de guardado ya fue usada para otra prueba."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
         prueba = Prueba.objects.prefetch_related(
             "resultados__divisiones__componentes"
         ).get(pk=request.data.get("prueba"))
@@ -551,30 +652,40 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
         decision["version"] = 2
         result_rules = request.data.get("reglas_resultados") or {}
         field_configs = request.data.get("campos") or []
-        try:
-            for field_config in field_configs:
-                if field_config.get("origen_limite") == "catalogo":
-                    continue
-                _validate_semaphore_rule(
-                    field_config.get("valor_global"),
-                    field_config.get("nombre") or field_config.get("codigo") or "Campo",
-                    field_config,
-                )
-            field_by_code = {
-                str(item.get("codigo")): item
-                for item in field_configs
-                if item.get("codigo")
-            }
-            for criterion in request.data.get("criterios") or []:
-                for field_code, rule in (criterion.get("valores") or {}).items():
-                    field_config = field_by_code.get(str(field_code), {})
+        # Compatibility with configurations created before "Regla base".
+        # A captured-at-assignment limit could not be evaluated consistently;
+        # it is now persisted as a normal direct rule.
+        for field_config in field_configs:
+            if field_config.get("origen_limite") == "asignacion":
+                field_config["origen_limite"] = "directo"
+        # A draft is intentionally allowed before the matrix has values.  It gives
+        # the user a real source id to download/import a generated Excel template;
+        # the normal save continues to enforce every required limit.
+        if not request.data.get("borrador_matriz"):
+            try:
+                for field_config in field_configs:
+                    if field_config.get("origen_limite") == "catalogo":
+                        continue
                     _validate_semaphore_rule(
-                        rule,
-                        f"{criterion.get('nombre') or 'Criterio'} / {field_config.get('nombre') or field_code}",
+                        field_config.get("valor_global"),
+                        field_config.get("nombre") or field_config.get("codigo") or "Campo",
                         field_config,
                     )
-        except ValueError as error:
-            return Response({"limites": [str(error)]}, status=status.HTTP_400_BAD_REQUEST)
+                field_by_code = {
+                    str(item.get("codigo")): item
+                    for item in field_configs
+                    if item.get("codigo")
+                }
+                for criterion in request.data.get("criterios") or []:
+                    for field_code, rule in (criterion.get("valores") or {}).items():
+                        field_config = field_by_code.get(str(field_code), {})
+                        _validate_semaphore_rule(
+                            rule,
+                            f"{criterion.get('nombre') or 'Criterio'} / {field_config.get('nombre') or field_code}",
+                            field_config,
+                        )
+            except ValueError as error:
+                return Response({"limites": [str(error)]}, status=status.HTTP_400_BAD_REQUEST)
 
         has_catalog_fields = any(
             item.get("origen_limite") == "catalogo"
@@ -584,9 +695,16 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
         )
         source_limit_type = "catalogo" if has_catalog_fields else "global"
         primary_catalog_id = catalogs[0].get("catalogo") if catalogs and has_catalog_fields else None
-        source = PruebaFuenteLimite.objects.filter(prueba=prueba).order_by("id").first()
-        if source is None:
-            source = PruebaFuenteLimite(prueba=prueba)
+        # Publishing is append-only. Existing assignments can keep their
+        # selected source, while new assignments may choose this version.
+        latest_version = PruebaFuenteLimite.objects.filter(prueba=prueba).aggregate(
+            latest=Max("version")
+        )["latest"] or 0
+        source = PruebaFuenteLimite(
+            prueba=prueba,
+            version=latest_version + 1,
+            idempotency_key=idempotency_key,
+        )
         source.tipo_limite = source_limit_type
         source.catalogo_fuente_id = primary_catalog_id
         source.campo_tecnico_muestra_id = None
@@ -597,14 +715,23 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
         source.reglas_resultados = result_rules
         source.publicada = bool(request.data.get("publicar", True))
         source.activo = True
-        source.deleted_at = None
-        source.version = (source.version or 0) + (1 if source.pk else 0)
-        source.save()
+        try:
+            # The unique key also protects against two requests that arrive at
+            # the same time (for example a retry after a slow connection).
+            with transaction.atomic():
+                source.save()
+        except IntegrityError:
+            if not idempotency_key:
+                raise
+            existing = PruebaFuenteLimite.objects.filter(idempotency_key=idempotency_key).first()
+            if existing:
+                return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
+            raise
+            raise
 
         PruebaFuenteLimite.objects.filter(prueba=prueba).exclude(pk=source.pk).update(
-            activo=False, deleted_at=timezone.now()
+            activo=False
         )
-        source.catalogos_configurados.all().delete()
         for index, relation in enumerate(catalogs, start=1):
             PruebaFuenteCatalogo.objects.create(
                 fuente_limite=source,
@@ -613,7 +740,6 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
                 orden=index,
             )
 
-        source.campos_limite.all().update(activo=False, deleted_at=timezone.now())
         leaves = _test_limit_leaves(prueba)
         field_by_code = {
             str(item.get("codigo")): item
@@ -683,7 +809,6 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
                 componente=leaf.get("componente"),
             ))
 
-        source.criterios.all().delete()
         for criterion_index, criterion_data in enumerate(request.data.get("criterios") or [], start=1):
             criterion = CriterioEvaluacionLimite.objects.create(
                 fuente_limite=source,
@@ -703,22 +828,20 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
                     item_id=selection.get("item"),
                 )
 
-        # Una nueva versión invalida contratos heredados de configuraciones anteriores.
-        # Los campos directos toman el nuevo default; los campos de asignación conservan
-        # sus ajustes contextuales, ya normalizados al formato canónico.
-        from apps.muestras.api.services.limit_contract_reconciliation import (
-            reconcile_test_assignments,
-            reconcile_test_predefined_details,
-        )
-        reconcile_test_assignments(prueba, reset_direct_defaults=True)
-        reconcile_test_predefined_details(prueba, reset_direct_defaults=True)
-
         source.refresh_from_db()
         return Response(self.get_serializer(source).data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="resolve-preview")
     def resolve_preview(self, request):
-        muestra = Muestra.objects.get(pk=request.data.get("muestra"))
+        muestras = Muestra.objects.select_related("lote")
+        user = request.user
+        if not (user.is_superuser or getattr(user, "role", None) == "GLOBAL"):
+            if not user.empresa_id:
+                return Response({"detail": "No tiene acceso a la muestra indicada."}, status=status.HTTP_404_NOT_FOUND)
+            muestras = muestras.filter(lote__cliente_empresa_id=user.empresa_id)
+        muestra = muestras.filter(pk=request.data.get("muestra")).first()
+        if not muestra:
+            return Response({"detail": "No tiene acceso a la muestra indicada."}, status=status.HTTP_404_NOT_FOUND)
         prueba = Prueba.objects.get(pk=request.data.get("prueba"))
         resultado = _get_optional(PruebaResultado, request.data.get("resultado"))
         division = _get_optional(PruebaResultadoDivision, request.data.get("division"))
@@ -749,7 +872,7 @@ class PruebaLimiteCampoViewSet(SoftDeleteViewSet):
     ordering_fields = ["orden", "nombre", "codigo", "created_at"]
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = self.queryset.all() if self.request.query_params.get("historial") in {"1", "true", "True"} else super().get_queryset()
         fuente = self.request.query_params.get("fuente_limite")
         prueba = self.request.query_params.get("prueba")
         if fuente:
@@ -944,7 +1067,12 @@ def _validate_semaphore_rule(rule, label, field_config=None):
     field_config = field_config or {}
     if field_config.get("origen_limite") in {"asignacion", "informativo"}:
         return None
-    operator = field_config.get("operador") or "max"
+    # Catalog rows can choose a different operation for each criterion.  The
+    # matrix rule is therefore authoritative; using only the field default
+    # made an imported/in-page change appear valid and fail only on save.
+    operator = rule.get("operador") or field_config.get("operador") or "max"
+    if operator == "informativo":
+        return None
     comparison_type = field_config.get("tipo_comparacion") or "numerica"
     yellow = bool(rule.get("usar_amarillo"))
     required = {

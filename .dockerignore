@@ -1,0 +1,32 @@
+# Never include repository metadata, credentials, or local runtime artefacts in
+# the production image. Persistent media is mounted by Compose and must stay
+# on the host; it is intentionally not deleted by the deployment workflow.
+.git
+.github
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+*.sqlite3
+*.db
+*.sql
+*.log
+logs/
+tmp/
+backups/
+node_modules/
+
+venv/
+.venv/
+env/
+ENV/
+dist/
+build/
+*.egg-info/

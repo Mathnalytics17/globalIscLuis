@@ -18,7 +18,6 @@ from apps.muestras.api.serializers.loteMuestras.index import (
     LoteMuestrasCreateSerializer,
      AddMuestrasToLoteSerializer,
 )
-from apps.dashboard.api.services.operational_center import notify_new_batch
 
 
 class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
@@ -111,6 +110,10 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 ),
             )
         )
+        queryset = queryset.prefetch_related(
+            "muestras__referencia_equipo",
+            "muestras__asignaciones_punto_muestreo__punto_muestreo",
+        )
 
         user = self.request.user
         if not (user.is_superuser or user.role == User.Role.GLOBAL):
@@ -174,9 +177,12 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         search = self.request.query_params.get("search")
         machine_id = self.request.query_params.get("machine_id")
         sampling_point_id = self.request.query_params.get("sampling_point_id")
+        client_id = self.request.query_params.get("client_id")
 
         if tipo_cliente and tipo_cliente != "todos":
             queryset = queryset.filter(tipo_cliente=tipo_cliente)
+        if client_id:
+            queryset = queryset.filter(cliente_empresa_id=client_id)
 
         if estado and estado != "todos":
             queryset = queryset.filter(estado=estado)
@@ -196,7 +202,11 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 | Q(cliente_ocasional_nombre__icontains=search)
                 | Q(contacto_nombre__icontains=search)
                 | Q(cliente_empresa__nombre__icontains=search)
-            )
+                | Q(muestras__referencia_equipo__nombre__icontains=search)
+                | Q(muestras__referencia_equipo__codigo_equipo__icontains=search)
+                | Q(muestras__equipo_placa__icontains=search)
+                | Q(muestras__asignaciones_punto_muestreo__punto_muestreo__nombre__icontains=search)
+            ).distinct()
 
         match_filter = Q()
         if machine_id:
@@ -226,7 +236,6 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         lote = serializer.save()
-        notify_new_batch(lote)
 
         response_serializer = LoteMuestrasDetailSerializer(lote, context=self.get_serializer_context())
 

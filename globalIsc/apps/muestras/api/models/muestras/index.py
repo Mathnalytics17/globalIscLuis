@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import connection, models, transaction
 from apps.users.api.models.index import User
 from django.core.validators import MinValueValidator
 import uuid
@@ -98,17 +98,33 @@ class Muestra(models.Model):
             models.Index(fields=["fecha_registro"]),
         ]
 
-    def save(self, *args, **kwargs):
-        if not self.id:
-            last_muestra = Muestra.objects.order_by("-id").first()
-            if last_muestra:
-                last_num = int(last_muestra.id[5:])
-                new_num = last_num + 1
-            else:
-                new_num = 1
-            self.id = f"M{timezone.now().year}{str(new_num).zfill(4)}"
+    @classmethod
+    def _next_identifier(cls):
+        """Return the next yearly sample identifier while ignoring legacy malformed IDs."""
+        prefix = f"M{timezone.now().year}"
+        highest = 0
+        for identifier in cls.objects.filter(id__startswith=prefix).values_list("id", flat=True):
+            suffix = identifier[len(prefix):]
+            if suffix.isdigit():
+                highest = max(highest, int(suffix))
+        return f"{prefix}{highest + 1:04d}"
 
-        super().save(*args, **kwargs)
+    def save(self, *args, **kwargs):
+        # Equipo y punto de medida no identifican una muestra: se pueden tomar
+        # muchas muestras del mismo punto para construir su histórico.  El ID es
+        # global y se genera de manera serializada para que dos ingresos rápidos
+        # (o dos peticiones simultáneas) nunca reutilicen el mismo consecutivo.
+        if self._state.adding and not self.id:
+            with transaction.atomic():
+                if connection.vendor == "postgresql":
+                    # Advisory lock shared by every worker, released al cerrar la
+                    # transacción. No depende de que ya exista una fila que bloquear.
+                    with connection.cursor() as cursor:
+                        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [81423019])
+                self.id = self._next_identifier()
+                return super().save(*args, **kwargs)
+
+        return super().save(*args, **kwargs)
 
 
 class HistorialMuestra(models.Model):

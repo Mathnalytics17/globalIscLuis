@@ -5,8 +5,8 @@ from .views.index import (
     AsignacionPuntoMuestreoViewSet,
     FolderViewSet,
     MaquinaViewSet,
+    LubricanteViewSet,
     PuntoMuestreoViewSet,
-    SyncCompanyRootFolders,
 )
 
 
@@ -20,7 +20,8 @@ urlpatterns = [
     path("sampling-points/<int:pk>/", PuntoMuestreoViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="sampling-points-detail"),
     path("sampling-points/<int:pk>/organize/", PuntoMuestreoViewSet.as_view({"post": "organize"}), name="sampling-points-organize"),
     path("sampling-points/<int:pk>/reactivate/", PuntoMuestreoViewSet.as_view({"post": "reactivate"}), name="sampling-points-reactivate"),
+    path("lubricants/", LubricanteViewSet.as_view({"get": "list", "post": "create"}), name="lubricant-list"),
+    path("lubricants/<int:pk>/", LubricanteViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="lubricant-detail"),
     path("sampling-point-assignments/", AsignacionPuntoMuestreoViewSet.as_view({"get": "list"}), name="sampling-point-assignments-list"),
     path("actives-tree/basic-structure/", ActivesTreeViewSet.as_view({"get": "basic_structure"}), name="basic-structure"),
-    path("sync-company-roots/", SyncCompanyRootFolders.as_view(), name="sync-company-roots"),
 ]

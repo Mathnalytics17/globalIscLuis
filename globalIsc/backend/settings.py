@@ -9,8 +9,11 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent
 ENV_DIR = BASE_DIR.parent
 
-load_dotenv(ENV_DIR / ".env")
-load_dotenv(BASE_DIR / ".env")
+# Docker injects its selected env_file before Django starts. When running the
+# source code directly, fall back to .env only if no runtime environment has
+# already been selected. This avoids .env.local silently inheriting .env.
+if not os.getenv("DJANGO_ENV"):
+    load_dotenv(ENV_DIR / ".env")
 
 
 def env_bool(name, default=False):
@@ -30,6 +33,26 @@ def env_list(name, default=None):
 ENVIRONMENT = os.getenv("DJANGO_ENV", "development").strip().lower()
 IS_PRODUCTION = ENVIRONMENT == "production"
 DEBUG = env_bool("DJANGO_DEBUG", not IS_PRODUCTION)
+
+
+def required_env(name):
+    value = os.getenv(name)
+    if not value:
+        raise ImproperlyConfigured(f"{name} is required when DJANGO_ENV=production.")
+    return value
+
+
+if IS_PRODUCTION:
+    if DEBUG:
+        raise ImproperlyConfigured("DJANGO_DEBUG must be false when DJANGO_ENV=production.")
+    # Do not silently deploy a public service with development fallbacks.
+    for _setting in (
+        "DJANGO_ALLOWED_HOSTS", "CORS_ALLOWED_ORIGINS", "CSRF_TRUSTED_ORIGINS",
+        "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST",
+        "REDIS_URL", "EMAIL_HOST", "EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD",
+        "DEFAULT_FROM_EMAIL",
+    ):
+        required_env(_setting)
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
@@ -55,10 +78,9 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
-    "rest_framework_simplejwt",
     "corsheaders",
     "django_filters",
-    "apps.activesTree",
+    "apps.activesTree.apps.ActivestreeConfig",
     "apps.users",
     "apps.misc",
     "apps.muestras",
@@ -74,6 +96,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "backend.middleware.SessionSecurityMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -114,6 +137,58 @@ DATABASES = {
 }
 
 
+# Redis is the server-side store for authenticated sessions and login limits.
+# Development gets an isolated local cache; production must provide private Redis.
+REDIS_URL = os.getenv("REDIS_URL")
+if IS_PRODUCTION and not REDIS_URL:
+    REDIS_URL = required_env("REDIS_URL")
+
+if REDIS_URL:
+    _redis_options = {
+        "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        "SOCKET_CONNECT_TIMEOUT": 3,
+        "SOCKET_TIMEOUT": 3,
+        "IGNORE_EXCEPTIONS": False,
+    }
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": _redis_options,
+            "KEY_PREFIX": os.getenv("CACHE_KEY_PREFIX", "globaloil"),
+        },
+        "sessions": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": _redis_options,
+            "KEY_PREFIX": f"{os.getenv('CACHE_KEY_PREFIX', 'globaloil')}:sessions",
+        },
+    }
+else:
+    CACHES = {
+        "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+        "sessions": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    }
+
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+SESSION_CACHE_ALIAS = "sessions"
+SESSION_COOKIE_NAME = "__Host-globaloil_session" if IS_PRODUCTION else "globaloil_session"
+SESSION_COOKIE_AGE = int(os.getenv("SESSION_COOKIE_AGE", "1800"))
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
+SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", not DEBUG)
+SESSION_COOKIE_DOMAIN = None
+SESSION_COOKIE_PATH = "/"
+SESSION_ABSOLUTE_AGE = int(os.getenv("SESSION_ABSOLUTE_AGE", "28800"))
+LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
+LOGIN_LOCKOUT_SECONDS = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "900"))
+PASSWORD_RESET_MAX_ATTEMPTS = int(os.getenv("PASSWORD_RESET_MAX_ATTEMPTS", "3"))
+PASSWORD_RESET_LOCKOUT_SECONDS = int(os.getenv("PASSWORD_RESET_LOCKOUT_SECONDS", "3600"))
+TRUST_X_FORWARDED_FOR = env_bool("TRUST_X_FORWARDED_FOR", IS_PRODUCTION)
+
+
 AUTH_USER_MODEL = "users.User"
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
@@ -130,7 +205,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.users.api.session_security.StrictCsrfSessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
@@ -141,28 +216,6 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ),
 }
-
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(
-        minutes=int(os.getenv("JWT_ACCESS_MINUTES", "1440"))
-    ),
-    "REFRESH_TOKEN_LIFETIME": timedelta(
-        days=int(os.getenv("JWT_REFRESH_DAYS", "7"))
-    ),
-    "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": False,
-    "UPDATE_LAST_LOGIN": True,
-    "ALGORITHM": "HS256",
-    "SIGNING_KEY": SECRET_KEY,
-    "AUTH_HEADER_TYPES": ("Bearer",),
-    "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
-    "USER_ID_FIELD": "id",
-    "USER_ID_CLAIM": "user_id",
-    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
-    "TOKEN_TYPE_CLAIM": "token_type",
-    "JTI_CLAIM": "jti",
-}
-
 
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
@@ -183,14 +236,16 @@ CORS_ALLOW_HEADERS = [
     "origin",
     "user-agent",
     "x-csrftoken",
+    "idempotency-key",
     "x-requested-with",
 ]
 CORS_EXPOSE_HEADERS = ["content-type", "authorization"]
 
-SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
 CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "Lax")
-SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", not DEBUG)
 CSRF_COOKIE_SECURE = env_bool("CSRF_COOKIE_SECURE", not DEBUG)
+CSRF_COOKIE_HTTPONLY = False  # The browser reads this non-secret token for X-CSRFToken.
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", CORS_ALLOWED_ORIGINS)
+CSRF_FAILURE_VIEW = "backend.views.csrf_failure"
 
 
 EMAIL_VERIFICATION_TOKEN_EXPIRY_DAYS = int(

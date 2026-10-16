@@ -289,6 +289,7 @@ class PruebaFuenteLimite(SoftDeleteModel):
     )
     version = models.PositiveIntegerField(default=1)
     publicada = models.BooleanField(default=False)
+    idempotency_key = models.CharField(max_length=64, blank=True, null=True, unique=True)
     notas = models.TextField(blank=True, null=True)
 
     class Meta:

@@ -267,12 +267,12 @@ def _best_limit_field(source, resultado=None, division=None, componente=None):
 
 
 def _resolve_limit(muestra, prueba, resultado=None, division=None, componente=None, prueba_muestra=None):
-    sources = (
-        PruebaFuenteLimite.objects
-        .filter(prueba=prueba, activo=True, deleted_at__isnull=True)
-        .select_related("catalogo_fuente")
-        .order_by("prioridad", "id")
-    )
+    # Assignments are contracts: evaluate against their chosen version even
+    # after a newer configuration becomes the active one.
+    source_filter = {"pk": prueba_muestra.fuente_limite_id} if getattr(prueba_muestra, "fuente_limite_id", None) else {
+        "prueba": prueba, "activo": True, "deleted_at__isnull": True,
+    }
+    sources = PruebaFuenteLimite.objects.filter(**source_filter).select_related("catalogo_fuente").order_by("prioridad", "id")
 
     has_sources = False
     missing_technical_information = False

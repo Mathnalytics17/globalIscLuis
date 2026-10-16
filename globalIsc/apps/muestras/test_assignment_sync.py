@@ -138,6 +138,20 @@ class AssignmentSyncTests(TestCase):
         assignment.refresh_from_db()
         self.assertEqual(json.loads(assignment.criterio_limite_valor), json.loads(second_rule))
 
+    def test_global_assignment_can_register_results_without_limits(self):
+        item = self.item(self.first_test)
+        item.update({
+            "aplicar_limites": False,
+            "criterio_limite_valor": "250",
+        })
+
+        self.sync([item])
+        assignment = PruebaMuestra.objects.get(prueba=self.first_test)
+
+        self.assertFalse(assignment.aplicar_limites)
+        self.assertIsNone(assignment.fuente_limite)
+        self.assertIsNone(assignment.criterio_limite_valor)
+
     def test_syncing_selected_sample_does_not_modify_other_sample(self):
         synchronize_batch_assignments(
             lote=self.batch,

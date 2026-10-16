@@ -1,12 +1,9 @@
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 
-from django.conf import settings
-from django.core.mail import send_mail
 from django.db.models import Count, Q
 from django.utils import timezone
 
-from apps.dashboard.models import NotificationDispatchLog, NotificationTopic
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
 from apps.reporte.api.models.index import Reporte
@@ -15,6 +12,18 @@ from apps.users.api.models.index import User
 
 CLOSED_BATCH_STATES = {"reportado", "cancelado"}
 ACTIVE_BATCH_STATES = {"borrador", "registrado", "recibido", "en_laboratorio", "en_analisis", "parcial", "resultados_completos", "revisado"}
+
+# These groups reflect the actual `LoteMuestras.estado` state machine.  A lot
+# has dates for shipping and reception, but it does not yet persist a
+# timestamp for every state transition.  The dashboard consequently reports
+# exact shipping time and *days since reception* for the later stages instead
+# of inventing a stage-entry date.
+OPERATIONAL_STAGES = {
+    "shipping": {"label": "En envío", "states": {"borrador", "registrado"}},
+    "received": {"label": "Recibidas", "states": {"recibido", "en_laboratorio"}},
+    "analysis": {"label": "En análisis", "states": {"en_analisis", "parcial", "resultados_completos"}},
+    "approval": {"label": "Pendientes de aprobación", "states": {"revisado"}},
+}
 
 STATUS_LABELS = {
     "borrador": "Borrador",
@@ -45,7 +54,7 @@ def scoped_batches_for_user(user):
     queryset = LoteMuestras.objects.select_related("cliente_empresa", "tipo_gestion", "usuario_registro").prefetch_related("muestras")
     if not user or not user.is_authenticated:
         return queryset.none()
-    if user.is_superuser or user.role in [User.Role.GLOBAL, User.Role.ADMIN, User.Role.LABORATORISTA]:
+    if user.is_superuser or user.role in [User.Role.GLOBAL, User.Role.LABORATORISTA]:
         return queryset
     return queryset.filter(cliente_empresa=user.empresa)
 
@@ -199,10 +208,112 @@ def _month_key(value):
     return f"{value.year}-{str(value.month).zfill(2)}"
 
 
+def _parse_date(value):
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _apply_operational_filters(queryset, params, today):
+    """Filter at the database boundary so dashboard aggregates share scope."""
+    client = params.get("cliente") or params.get("empresa")
+    management = params.get("tipo_gestion") or params.get("gestion")
+    if client:
+        queryset = queryset.filter(cliente_empresa_id=client)
+    if management:
+        queryset = queryset.filter(tipo_gestion_id=management)
+
+    start = _parse_date(params.get("fecha_desde"))
+    end = _parse_date(params.get("fecha_hasta"))
+    period = str(params.get("periodo") or "").lower()
+    if not start and not end:
+        if period == "dia":
+            start = end = today
+        elif period == "mes":
+            start = today.replace(day=1)
+            next_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+            end = next_month - timedelta(days=1)
+        elif period in {"ano", "año", "year"}:
+            start, end = date(today.year, 1, 1), date(today.year, 12, 31)
+    if start:
+        queryset = queryset.filter(fecha_envio__gte=start)
+    if end:
+        queryset = queryset.filter(fecha_envio__lte=end)
+    return queryset, {"cliente": str(client or ""), "tipo_gestion": str(management or ""), "fecha_desde": start, "fecha_hasta": end, "periodo": period or "todos"}
+
+
+def _operational_stage(batch):
+    for key, definition in OPERATIONAL_STAGES.items():
+        if batch.estado in definition["states"]:
+            return key
+    return None
+
+
+def _days_since(value, today):
+    if not value:
+        return None
+    return max(0, (today - value).days)
+
+
+def _build_stage_metrics(batches, today):
+    grouped = {key: [] for key in OPERATIONAL_STAGES}
+    for batch in batches:
+        stage = _operational_stage(batch)
+        if stage:
+            grouped[stage].append(batch)
+
+    metrics = []
+    for key, definition in OPERATIONAL_STAGES.items():
+        items = grouped[key]
+        if key == "shipping":
+            values = [_days_since(item.fecha_envio, today) for item in items]
+            time_label = "Promedio de días en envío"
+        else:
+            values = [_days_since(item.fecha_recepcion, today) for item in items]
+            time_label = "Promedio de días desde recepción"
+        known = [value for value in values if value is not None]
+        metrics.append({
+            "key": key,
+            "label": definition["label"],
+            "count": len(items),
+            "average_days": round(sum(known) / len(known), 1) if known else None,
+            "time_label": time_label,
+        })
+    return metrics
+
+
+def _serialize_operational_delay(batch, today):
+    stage = _operational_stage(batch)
+    if not stage:
+        return None
+    stage_definition = OPERATIONAL_STAGES[stage]
+    stage_date = batch.fecha_envio if stage == "shipping" else batch.fecha_recepcion
+    days = _days_since(stage_date, today)
+    return {
+        "id": batch.id,
+        "client": _client_name(batch),
+        "management_type": getattr(batch.tipo_gestion, "nombre", None) or "Sin gestión",
+        # A row represents a batch.  A raw machine foreign-key here produced
+        # values such as "4" and "2" under the misleading header "Equipo".
+        "sample_count": len(batch.muestras.all()),
+        "stage": stage,
+        "stage_label": stage_definition["label"],
+        "stage_date": stage_date,
+        "days_in_stage": days,
+        "time_label": "Días en envío" if stage == "shipping" else "Días desde recepción",
+        "severity": "alta" if (days or 0) >= 10 else "media" if (days or 0) >= 5 else "normal",
+        "action": ACTION_BY_STATE.get(batch.estado, ("Ver lote", "/muestras/lotes/{id}"))[1].format(id=batch.id),
+    }
+
+
 def build_operational_center(user, params=None):
     params = params or {}
     today = timezone.localdate()
-    batches = list(scoped_batches_for_user(user).all())
+    base_queryset, applied_filters = _apply_operational_filters(scoped_batches_for_user(user), params, today)
+    batches = list(base_queryset.all())
     active_batches = [item for item in batches if item.estado not in CLOSED_BATCH_STATES]
     serialized = [serialize_batch_card(item, today=today) for item in active_batches]
 
@@ -273,9 +384,37 @@ def build_operational_center(user, params=None):
         if batch.estado == "reportado":
             monthly[_month_key(batch.fecha_actualizacion)]["reported"] += 1
 
+    stage_metrics = _build_stage_metrics(batches, today)
+    delayed_samples = [item for item in (_serialize_operational_delay(batch, today) for batch in active_batches) if item]
+    delayed_samples.sort(key=lambda item: (item["days_in_stage"] is None, -(item["days_in_stage"] or 0), item["id"]))
+    received_days = [_days_since(batch.fecha_recepcion, today) for batch in active_batches if batch.fecha_recepcion]
+    client_options = sorted({
+        (str(batch.cliente_empresa_id), _client_name(batch))
+        for batch in scoped_batches_for_user(user).exclude(cliente_empresa__isnull=True)
+    }, key=lambda item: item[1].lower())
+    management_options = sorted({
+        (str(batch.tipo_gestion_id), getattr(batch.tipo_gestion, "nombre", None) or "Sin gestión")
+        for batch in scoped_batches_for_user(user).exclude(tipo_gestion__isnull=True)
+    }, key=lambda item: item[1].lower())
+
     return {
         "generated_at": timezone.now(),
         "today": today,
+        "filters": {
+            "applied": applied_filters,
+            "clients": [{"id": key, "label": label} for key, label in client_options],
+            "management_types": [{"id": key, "label": label} for key, label in management_options],
+            "periods": ["dia", "mes", "ano"],
+        },
+        "operational": {
+            "stages": stage_metrics,
+            "average_process_days": round(sum(received_days) / len(received_days), 1) if received_days else None,
+            "average_process_label": "Promedio desde recepción",
+            "analysis_count": completed_tests,
+            "analysis_label": "Pruebas con resultado confirmado",
+            "delayed_samples": delayed_samples[:50],
+            "time_note": "El sistema registra envío y recepción. No registra aún la fecha de cada cambio de etapa; por eso las etapas posteriores muestran días desde recepción.",
+        },
         "summary": {
             "active_batches": len(active_batches),
             "new_today": len(new_today),
@@ -324,184 +463,3 @@ def _alert(kind, severity, title, detail, batch_card):
     }
 
 
-def recipients_for_topic(topic):
-    return topic.resolved_recipient_emails()
-
-
-def send_topic_email(code, subject, message, payload=None):
-    topic = NotificationTopic.objects.filter(code=code, active=True, email_enabled=True).first()
-    if not topic:
-        return {"sent": False, "reason": "topic_disabled", "recipients": []}
-
-    recipients = recipients_for_topic(topic)
-    if not recipients:
-        NotificationDispatchLog.objects.create(
-            topic=topic,
-            event_code=code,
-            subject=subject,
-            recipients=[],
-            status="skipped",
-            payload=payload or {},
-            error="Sin destinatarios configurados.",
-        )
-        return {"sent": False, "reason": "no_recipients", "recipients": []}
-
-    status = "sent"
-    error = ""
-    try:
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, recipients, fail_silently=False)
-        topic.last_sent_at = timezone.now()
-        topic.save(update_fields=["last_sent_at", "updated_at"])
-    except Exception as exc:
-        status = "failed"
-        error = str(exc)
-
-    NotificationDispatchLog.objects.create(
-        topic=topic,
-        event_code=code,
-        subject=subject,
-        message=message,
-        recipients=recipients,
-        status=status,
-        attempts=1,
-        error=error,
-        payload=payload or {},
-        processed_at=timezone.now(),
-    )
-    return {"sent": status == "sent", "status": status, "error": error, "recipients": recipients}
-
-
-def queue_topic_email(code, subject, message, payload=None):
-    topic = NotificationTopic.objects.filter(code=code, active=True, email_enabled=True).first()
-    if not topic:
-        return {"queued": False, "reason": "topic_disabled", "recipients": []}
-
-    recipients = recipients_for_topic(topic)
-    status = "pending" if recipients else "skipped"
-    log = NotificationDispatchLog.objects.create(
-        topic=topic,
-        event_code=code,
-        subject=subject,
-        message=message,
-        recipients=recipients,
-        status=status,
-        error="" if recipients else "Sin destinatarios configurados.",
-        payload=payload or {},
-    )
-    return {
-        "queued": status == "pending",
-        "status": status,
-        "log_id": log.id,
-        "recipients": recipients,
-    }
-
-
-def process_pending_notifications(limit=50):
-    pending_ids = list(
-        NotificationDispatchLog.objects.filter(status="pending")
-        .order_by("created_at")
-        .values_list("id", flat=True)[:limit]
-    )
-    summary = {"processed": 0, "sent": 0, "failed": 0}
-    for log_id in pending_ids:
-        log = NotificationDispatchLog.objects.select_related("topic").get(pk=log_id)
-        log.attempts += 1
-        log.processed_at = timezone.now()
-        try:
-            send_mail(
-                log.subject,
-                log.message,
-                settings.DEFAULT_FROM_EMAIL,
-                log.recipients,
-                fail_silently=False,
-            )
-            log.status = "sent"
-            log.error = ""
-            summary["sent"] += 1
-            if log.topic:
-                log.topic.last_sent_at = log.processed_at
-                log.topic.save(update_fields=["last_sent_at", "updated_at"])
-        except Exception as exc:
-            log.status = "failed"
-            log.error = str(exc)
-            summary["failed"] += 1
-        log.save(update_fields=["attempts", "processed_at", "status", "error"])
-        summary["processed"] += 1
-    return summary
-
-
-def build_daily_digest_message(center):
-    summary = center["summary"]
-    lines = [
-        "Resumen operativo diario",
-        "",
-        f"Lotes activos: {summary['active_batches']}",
-        f"Nuevos hoy: {summary['new_today']}",
-        f"Vencidos: {summary['overdue']}",
-        f"Vencen hoy: {summary['due_today']}",
-        f"Proximos a vencer: {summary['due_soon']}",
-        f"Listos para informe: {summary['ready']}",
-        f"Resultados no deseados: {summary['undesired_results']}",
-        "",
-        "Acciones sugeridas:",
-    ]
-    for item in center["queues"]["priority"][:8]:
-        lines.append(f"- {item['id']} - {item['client']} - {item['due']['label']} - {item['action']['label']}")
-    return "\n".join(lines)
-
-
-def send_daily_digest(user):
-    center = build_operational_center(user)
-    today = timezone.localdate()
-    subject = f"Resumen operativo diario - Global Oil - {today:%d/%m/%Y}"
-    message = build_daily_digest_message(center)
-    return send_topic_email(NotificationTopic.EventCode.DAILY_DIGEST, subject, message, {"summary": center["summary"]})
-
-
-def send_due_batches_digest(user, code):
-    """Send the configured daily delivery warning to its own recipient list."""
-    queue_key = {
-        NotificationTopic.EventCode.DUE_SOON: "due_soon",
-        NotificationTopic.EventCode.OVERDUE: "overdue",
-    }.get(code)
-    if not queue_key:
-        return {"sent": False, "reason": "unsupported_event", "recipients": []}
-
-    center = build_operational_center(user)
-    batches = center["queues"][queue_key]
-    topic = NotificationTopic.objects.filter(code=code, active=True, email_enabled=True).first()
-    if not topic:
-        return {"sent": False, "reason": "topic_disabled", "recipients": []}
-    if not batches:
-        topic.last_sent_at = timezone.now()
-        topic.save(update_fields=["last_sent_at", "updated_at"])
-        return {"sent": False, "reason": "no_matches", "recipients": topic.resolved_recipient_emails()}
-
-    label = "Lotes próximos a vencer" if code == NotificationTopic.EventCode.DUE_SOON else "Lotes vencidos"
-    subject = f"{label} - Global Oil - {timezone.localdate():%d/%m/%Y}"
-    lines = [label, ""]
-    for item in batches:
-        lines.append(
-            f"- {item['id']} | {item['client']} | {item['due']['label']} | {item['status_label']}"
-        )
-    lines.extend(["", "Consulte el centro operativo de Global Oil para ver el detalle."])
-    return send_topic_email(code, subject, "\n".join(lines), {"batches": [item["id"] for item in batches]})
-
-
-def notify_new_batch(batch):
-    subject = f"Nuevo lote ingresado - {batch.id}"
-    message = "\n".join([
-        f"Se ingreso un nuevo lote de muestras: {batch.id}",
-        f"Cliente: {_client_name(batch)}",
-        f"Tipo de gestion: {getattr(batch.tipo_gestion, 'nombre', None) or 'Sin gestion'}",
-        f"Contacto: {batch.contacto_nombre or '-'}",
-        f"Correo contacto: {batch.contacto_email or '-'}",
-        "",
-        f"Ver lote: /muestras/lotes/{batch.id}",
-    ])
-    return queue_topic_email(
-        NotificationTopic.EventCode.NEW_CLIENT_BATCH,
-        subject,
-        message,
-        {"batch_id": batch.id, "client": _client_name(batch)},
-    )

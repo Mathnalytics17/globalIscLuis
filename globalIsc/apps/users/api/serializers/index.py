@@ -3,7 +3,6 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core import exceptions
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.users.api.models.index  import (
     EmailVerificationToken,
     PasswordResetToken,
@@ -58,27 +57,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         validated_data.pop('password2')
         user = User.objects.create_user(**validated_data)
         return user
-
-class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    @classmethod
-    def get_token(cls, user):
-        token = super().get_token(user)
-        
-        # Add custom claims
-        token['email'] = user.email
-        token['role'] = user.role
-        token['is_active'] = user.is_active
-        token['email_verified'] = user.email_verified
-        
-        return token
-
-    def validate(self, attrs):
-        data = super().validate(attrs)
-        
-        if not self.user.is_active:
-            raise serializers.ValidationError("User account is not active.")
-            
-        return data
 
 class UserSerializer(serializers.ModelSerializer):
     empresa = serializers.StringRelatedField(read_only=True)  # Solo el string representation
@@ -172,8 +150,25 @@ class UserDetailSerializer(serializers.ModelSerializer):
                  'firma_predeterminada']
         extra_kwargs = {
             'password': {'write_only': True},
-            'date_joined': {'read_only': True}
+            'date_joined': {'read_only': True},
+            # Roles are assigned exclusively through guarded company profiles.
+            'role': {'read_only': True},
         }
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        if request and self.instance and request.user == self.instance:
+            protected_fields = {
+                "is_active", "email_verified", "access_status", "is_read_only",
+                "blocked_at", "blocked_by", "block_reason", "block_scope",
+            }
+            attempted = protected_fields.intersection(attrs)
+            if attempted:
+                raise serializers.ValidationError({
+                    field: "Este campo solo puede cambiarlo un administrador autorizado."
+                    for field in attempted
+                })
+        return attrs
 
     def update(self, instance, validated_data):
         # Evitar que se actualice el username y bloquear cambio de empresa.
@@ -223,61 +218,38 @@ User = get_user_model()
 
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
-    
-    def validate_email(self, value):
-        if not User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("No existe un usuario con este email")
-        return value
 
     def create(self, validated_data):
-        user = User.objects.get(email=validated_data['email'])
-        
-        # Invalidar tokens previos
+        user = User.objects.filter(email=validated_data['email']).first()
+        if user is None:
+            return {'message': 'Si la cuenta existe, recibirá instrucciones de recuperación.'}
+
         PasswordResetToken.objects.filter(user=user).delete()
-        
-        # Crear nuevo token
         token = PasswordResetToken.objects.create(
             user=user,
-            expires_at=timezone.now() + timedelta(hours=24)
+            expires_at=timezone.now() + timedelta(
+                hours=settings.PASSWORD_RESET_TOKEN_EXPIRY_HOURS
+            ),
         )
-        
-        # Aquí deberías enviar el email (implementar esta parte)
-        self.send_reset_email(user, token)
-        
-        return {'message': 'Se ha enviado un email con instrucciones'}
+        try:
+            self.send_reset_email(user, token)
+        except Exception:
+            logger.exception("No se pudo enviar el correo de recuperación")
+        return {'message': 'Si la cuenta existe, recibirá instrucciones de recuperación.'}
 
     def send_reset_email(self, user, token):
-         # Eliminar tokens previos si existen
-            PasswordResetToken.objects.filter(user=user).delete()
-            
-            expires_at = timezone.now() + timedelta(days=settings.EMAIL_VERIFICATION_TOKEN_EXPIRY_DAYS)
-            token = PasswordResetToken.objects.create(
-                user=user,
-                expires_at=expires_at
-            )
-            reset_url = f"{settings.FRONTEND_URL}users/resetPassword?token={token.token}"
-           
-            subject = "Cambia tu password"
-            message = f"""
-            Hola {user.get_full_name() or user.email},
-            
-            Por favor haz clic en el siguiente enlace para verificar tu correo:
-            { reset_url}
-            
-            Este enlace expirará en {settings.EMAIL_VERIFICATION_TOKEN_EXPIRY_DAYS} días.
-            
-            Si no solicitaste este registro, ignora este mensaje.
-            """
-            
-            send_mail(
-                subject,
-                message,
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-                fail_silently=False,
-            )
-            
-            logger.info("Email de recuperación enviado a %s", user.email)
+        reset_url = f"{settings.FRONTEND_URL}users/resetPassword?token={token.token}"
+        subject = "Restablece tu contraseña"
+        message = f"""Hola {user.get_full_name() or user.email},
+
+Solicitaste restablecer tu contraseña. Abre este enlace:
+{reset_url}
+
+El enlace expirará en {settings.PASSWORD_RESET_TOKEN_EXPIRY_HOURS} horas.
+Si no lo solicitaste, ignora este correo.
+"""
+        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False)
+        logger.info("Correo de recuperación solicitado para el usuario %s", user.pk)
 class PasswordResetConfirmSerializer(serializers.Serializer):
     token = serializers.CharField()
     new_password = serializers.CharField(min_length=8, write_only=True)

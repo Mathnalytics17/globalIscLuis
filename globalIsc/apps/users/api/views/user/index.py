@@ -1,7 +1,7 @@
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, authenticate, login as django_login, logout as django_logout
 from django.utils import timezone
 from rest_framework.views import APIView
 from django.conf import settings
@@ -21,8 +21,6 @@ from django.shortcuts import get_object_or_404
 from permissions import IsAdmin,IsGlobal,IsLaboratorista,IsEmpresa,IsOperario,IsOwnerOrAdmin
 from datetime import timedelta
 import logging
-from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework import serializers, permissions
 
 from rest_framework.permissions import IsAuthenticated
@@ -35,20 +33,26 @@ from rest_framework import permissions
 from django.db.models import Count, Sum
 from django.utils import timezone
 from datetime import timedelta
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
-from rest_framework_simplejwt.exceptions import AuthenticationFailed
-from django.contrib.auth import authenticate
 from rest_framework import serializers, status
 from rest_framework.response import Response
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework_simplejwt.views import TokenObtainPairView
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.utils.decorators import method_decorator
+from apps.users.api.session_security import (
+    clear_failed_logins,
+    establish_session,
+    login_is_limited,
+    password_reset_is_limited,
+    record_failed_login,
+    record_password_reset_request,
+    revoke_user_sessions,
+)
 
-class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
+class LegacyAuthenticationMigrationRemoved:
     def validate(self, attrs):
         email = attrs.get('email')
         password = attrs.get('password')
@@ -96,8 +100,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         
         # Add custom claims
         refresh = self.get_token(self.user)
-        data['refresh'] = str(refresh)
-        data['access'] = str(refresh.access_token)
+        data['legacy_session'] = str(refresh)
         
         # Add custom user data
         data['user'] = UserSerializer(self.user).data
@@ -119,12 +122,12 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         
         return token
 
-class LoginAV(TokenObtainPairView):
+class LegacyAuthenticationLoginRemoved:
     """
     Vista personalizada para el login de usuarios
-    Utiliza el serializador MyTokenObtainPairSerializer
+    Retained only to avoid breaking historical imports; it is not routed.
     """
-    serializer_class = MyTokenObtainPairSerializer
+    serializer_class = LegacyAuthenticationMigrationRemoved
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -160,6 +163,57 @@ class LoginAV(TokenObtainPairView):
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
+
+
+class CsrfCookieView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    @method_decorator(ensure_csrf_cookie)
+    def get(self, request):
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LoginAV(APIView):
+    """Establishes a server-side Redis session and never returns browser tokens."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        email = str(request.data.get("email") or "").strip()
+        password = request.data.get("password") or ""
+        if not email or not password:
+            return Response({"detail": "Credenciales inválidas."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        if login_is_limited(request, email):
+            audit_user_action(request, "auth.login_rate_limited", detail="Intento limitado")
+            return Response({"detail": "Demasiados intentos. Intente de nuevo más tarde."}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+        user = authenticate(request=request, username=email, password=password)
+        is_allowed = bool(
+            user
+            and user.is_active
+            and user.email_verified
+            and user.access_status not in {User.AccessStatus.BLOCKED, User.AccessStatus.DISABLED}
+        )
+        if not is_allowed:
+            record_failed_login(request, email)
+            audit_user_action(request, "auth.login_failed", target_user=user, detail="Credenciales o estado no válido")
+            return Response({"detail": "Credenciales inválidas."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        django_login(request, user)
+        establish_session(request, user)
+        clear_failed_logins(request, email)
+        audit_user_action(request, "auth.login_succeeded", target_user=user)
+        return Response({"user": UserSerializer(user).data}, status=status.HTTP_200_OK)
+
+
+class LogoutAV(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        audit_user_action(request, "auth.logout", target_user=request.user)
+        django_logout(request)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class UserRegistrationView(generics.CreateAPIView):
     """
@@ -277,9 +331,8 @@ class UserViewSet(viewsets.ModelViewSet):
         
         user.set_password(serializer.validated_data['new_password'])
         user.save()
-        
-        # Invalidate all tokens after password change
-        user.auth_token_set.all().delete()
+        revoke_user_sessions(user)
+        audit_user_action(request, "auth.password_changed", target_user=user)
         
         return Response({"status": "Contraseña actualizada correctamente"})
     
@@ -328,6 +381,7 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance.access_status = User.AccessStatus.DISABLED
         instance.is_read_only = True
         instance.save(update_fields=["is_active", "access_status", "is_read_only"])
+        revoke_user_sessions(instance)
         instance.company_profiles.update(status="REMOVED")
         audit_user_action(request, "users.logical_delete", target_user=instance)
         return Response({"detail": "Usuario desactivado correctamente."}, status=status.HTTP_200_OK)
@@ -373,8 +427,15 @@ class EmailVerificationView(generics.GenericAPIView):
 class ForgotPasswordView(APIView):
     permission_classes = [permissions.AllowAny]
     def post(self, request):
+        email = str(request.data.get("email") or "")
+        if password_reset_is_limited(request, email):
+            return Response(
+                {'message': 'Si la cuenta existe, recibirá instrucciones de recuperación.'},
+                status=status.HTTP_200_OK,
+            )
         serializer = PasswordResetRequestSerializer(data=request.data)
         if serializer.is_valid():
+            record_password_reset_request(request, email)
             result = serializer.create(serializer.validated_data)
             return Response(result, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -412,6 +473,7 @@ class PasswordResetConfirmView(generics.GenericAPIView):
             user = token.user
             user.set_password(serializer.validated_data['new_password'])
             user.save()
+            revoke_user_sessions(user)
             
             # Eliminar token de reset
             token.delete()

@@ -1,0 +1,23 @@
+# Local-only override. Never use this file for the production deployment.
+# It publishes only the ports needed from this computer: PostgreSQL for pgAdmin,
+# HTTP for the Next.js app and Daphne for WebSocket tests.
+services:
+  db:
+    ports:
+      - "5433:5432"
+
+  web:
+    volumes:
+      - ./globalIsc:/usr/src/globalIsc
+    ports:
+      - "8000:8000"
+    environment:
+      RUN_MIGRATIONS: "true"
+
+  daphne:
+    volumes:
+      - ./globalIsc:/usr/src/globalIsc
+    ports:
+      - "8002:8002"
+    environment:
+      RUN_MIGRATIONS: "false"

@@ -17,10 +17,12 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path,include
 from backend.health import health_check
+from backend.views import private_media
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("api/", include("backend.api.urls")),
     path("api/health/", health_check, name="health-check"),
+    path("media/<path:path>", private_media, name="private-media"),
    
     
     ]

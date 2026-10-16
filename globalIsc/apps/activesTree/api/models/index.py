@@ -53,6 +53,12 @@ class PuntoMuestreo(models.Model):
     codigo = models.CharField(max_length=80, blank=True, null=True)
     descripcion = models.TextField(blank=True, null=True)
     lubricante = models.CharField(max_length=150, blank=True, null=True)
+    # El texto se conserva por compatibilidad con puntos históricos. Los nuevos
+    # flujos deben usar el catálogo y mostrar este valor como etiqueta.
+    lubricante_catalogo = models.ForeignKey(
+        'Lubricante', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='puntos_muestreo',
+    )
     frecuencia_cambio = models.PositiveIntegerField(blank=True, null=True)
     unidad_frecuencia_cambio = models.CharField(max_length=10, default='horas')
     frecuencia_analisis = models.PositiveIntegerField(blank=True, null=True)
@@ -85,6 +91,29 @@ class PuntoMuestreo(models.Model):
 
     def __str__(self):
         return f'{self.maquina.nombre} / {self.nombre}'
+
+
+class Lubricante(models.Model):
+    """Catálogo global reutilizable; no pertenece a una empresa ni a una muestra."""
+
+    nombre = models.CharField(max_length=150)
+    fabricante = models.CharField(max_length=150, blank=True, default='')
+    referencia = models.CharField(max_length=150, blank=True, default='')
+    activo = models.BooleanField(default=True, db_index=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['nombre', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['fabricante', 'referencia'],
+                name='unique_global_lubricant_manufacturer_reference',
+            ),
+        ]
+
+    def __str__(self):
+        return self.nombre
 
 
 class AsignacionPuntoMuestreo(models.Model):

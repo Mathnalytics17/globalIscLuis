@@ -1,5 +1,4 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views.security import (
     SecurityPermissionViewSet,
@@ -11,9 +10,11 @@ from .views.security import (
 )
 from .views.user.index import (
     CurrentUserView,
+    CsrfCookieView,
     EmailVerificationView,
     ForgotPasswordView,
     LoginAV,
+    LogoutAV,
     PasswordResetConfirmView,
     UserDetailView,
     UserRegistrationView,
@@ -25,8 +26,9 @@ urlpatterns = [
     path("users/", UserViewSet.as_view({"get": "list"}), name="user-list"),
     path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
     path("users/register/", UserRegistrationView.as_view(), name="register"),
-    path("users/login/", LoginAV.as_view(), name="token_obtain_pair"),
-    path("users/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("users/csrf/", CsrfCookieView.as_view(), name="csrf-cookie"),
+    path("users/login/", LoginAV.as_view(), name="session-login"),
+    path("users/logout/", LogoutAV.as_view(), name="session-logout"),
     path("users/verify-email/", EmailVerificationView.as_view(), name="verify_email"),
     path("users/password-reset/", ForgotPasswordView.as_view(), name="password_reset"),
     path("users/password-reset/confirm/", PasswordResetConfirmView.as_view(), name="password_reset_confirm"),
