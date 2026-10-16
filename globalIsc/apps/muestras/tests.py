@@ -35,7 +35,110 @@ from apps.muestras.api.views.sampleBatchExcel.index import (
     template_columns,
 )
 from apps.misc.api.views.dynamicTechnicalConfig.index import _build_limit_fields_from_prueba
-from apps.users.api.models.index import User
+from apps.users.api.models.index import (
+    SecurityPermission,
+    SecurityRole,
+    SecurityRolePermission,
+    User,
+    UserCompanyProfile,
+)
+
+
+class SampleIdentifierTests(TestCase):
+    def setUp(self):
+        self.company = Empresa.objects.create(nombre="Empresa consecutivos")
+        self.user = User.objects.create_superuser(
+            email="identifiers@example.com",
+            password="test-password",
+            empresa=self.company,
+        )
+        self.batch = LoteMuestras.objects.create(
+            tipo_cliente="registrado",
+            cliente_empresa=self.company,
+            fecha_envio=timezone.localdate(),
+            estado="registrado",
+            usuario_registro=self.user,
+        )
+
+    def test_new_sample_uses_next_yearly_identifier_even_for_same_context(self):
+        prefix = f"M{timezone.now().year}"
+        Muestra.objects.create(
+            id=f"{prefix}0227",
+            lote=self.batch,
+            fecha_toma=timezone.now(),
+            usuario_registro=self.user,
+        )
+
+        following = Muestra.objects.create(
+            lote=self.batch,
+            fecha_toma=timezone.now(),
+            usuario_registro=self.user,
+        )
+
+        self.assertEqual(following.id, f"{prefix}0228")
+
+
+class BatchObjectAuthorizationTests(TestCase):
+    """Regression coverage for BOLA/IDOR in the sample-batch flow."""
+
+    def setUp(self):
+        self.company_a = Empresa.objects.create(nombre="Empresa A - acceso")
+        self.company_b = Empresa.objects.create(nombre="Empresa B - protegida")
+        self.user = User.objects.create_user(
+            email="operator-a@example.com",
+            password="test-password",
+            empresa=self.company_a,
+            role=User.Role.EMPRESA,
+            is_active=True,
+            access_status=User.AccessStatus.ACTIVE,
+        )
+        role = SecurityRole.objects.create(
+            name="Operador de pruebas de aislamiento",
+            code="operator-object-access-tests",
+            scope=SecurityRole.Scope.COMPANY,
+        )
+        for code in ["lotes.ver", "laboratorio.ingresar_lote"]:
+            permission, _ = SecurityPermission.objects.get_or_create(
+                code=code,
+                defaults={"module": code.split(".")[0], "action": code.split(".")[1]},
+            )
+            SecurityRolePermission.objects.create(role=role, permission=permission, allowed=True)
+        UserCompanyProfile.objects.create(
+            user=self.user,
+            empresa=self.company_a,
+            role=role,
+            status=UserCompanyProfile.Status.ACTIVE,
+        )
+        self.foreign_lote = LoteMuestras.objects.create(
+            id="L-FOREIGN-ACCESS",
+            tipo_cliente="registrado",
+            cliente_empresa=self.company_b,
+            fecha_envio=timezone.localdate(),
+            estado="registrado",
+            usuario_registro=self.user,
+        )
+        Muestra.objects.create(
+            lote=self.foreign_lote,
+            fecha_toma=timezone.now(),
+            usuario_registro=self.user,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_company_user_cannot_retrieve_a_foreign_batch_by_id(self):
+        response = self.client.get(f"/api/lubrication/sample-batches/{self.foreign_lote.id}/")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_company_user_cannot_create_lab_entry_for_foreign_batch(self):
+        response = self.client.post(
+            "/api/lubrication/lab-batch-entries/",
+            {"lote": self.foreign_lote.id, "fecha_recepcion": timezone.now().isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("No tiene acceso", str(response.data))
 
 
 class SampleLifecycleSafetyTests(TestCase):

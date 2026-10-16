@@ -1,7 +1,7 @@
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from apps.activesTree.api.models.index import PuntoMuestreo, AsignacionPuntoMuestreo
+from apps.activesTree.api.models.index import Carpeta, PuntoMuestreo, AsignacionPuntoMuestreo
 from apps.activesTree.api.models.machines.index import Maquina
 from apps.misc.api.models.companies.index import Empresa
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
@@ -35,6 +35,27 @@ class SamplingPointApiTests(APITestCase):
         }, format='json')
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['empresa_id'], self.company.id)
+
+    def test_company_root_is_created_automatically(self):
+        self.assertTrue(Carpeta.objects.filter(
+            compania=self.company, typeFolder='root', id_parent_node='-1',
+        ).exists())
+
+    def test_global_lubricant_can_be_used_by_a_point_from_any_company(self):
+        created = self.client.post('/api/lubricants/', {
+            'fabricante': 'Petrobras', 'referencia': 'Hydra 68',
+        }, format='json')
+        self.assertEqual(created.status_code, 201)
+
+        other_company = Empresa.objects.create(nombre='Otro cliente')
+        other_machine = Maquina.objects.create(nombre='Maquina externa', empresa=other_company)
+        point = self.client.post('/api/sampling-points/', {
+            'maquina': other_machine.id,
+            'nombre': 'Punto externo',
+            'lubricante_catalogo': created.data['id'],
+        }, format='json')
+        self.assertEqual(point.status_code, 201)
+        self.assertEqual(point.data['lubricante_catalogo'], created.data['id'])
 
     def test_bulk_assignment_skips_samples_from_other_machine(self):
         point = PuntoMuestreo.objects.create(maquina=self.machine, nombre='Puerto 1')

@@ -21,7 +21,6 @@ OPERATIONAL_MODELS = (
     "activesTree.AsignacionPuntoMuestreo",
     "muestras.Muestra",
     "muestras.LoteMuestras",
-    "dashboard.NotificationDispatchLog",
 )
 
 SECURITY_TRANSIENT_MODELS = (

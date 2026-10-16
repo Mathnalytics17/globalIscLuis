@@ -204,6 +204,29 @@ class ReportEmailTests(TestCase):
         self.assertEqual(response.data["generated"], 1)
         self.assertTrue(Reporte.objects.filter(muestra=self.sample, Responsable="Responsable del lote").exists())
 
+    def test_tenant_sample_scope_excludes_another_company(self):
+        other_company = Empresa.objects.create(nombre="Empresa ajena", email="ajena@example.com")
+        other_batch = LoteMuestras.objects.create(
+            id="L20269998",
+            cliente_empresa=other_company,
+            fecha_envio=timezone.localdate(),
+            usuario_registro=self.user,
+        )
+        other_sample = Muestra.objects.create(
+            id="M20269998",
+            lote=other_batch,
+            fecha_toma=timezone.now(),
+            usuario_registro=self.user,
+        )
+        factory = APIRequestFactory()
+        request = factory.get("/api/lubrication/reports/")
+        request.user = self.user
+        view = ReporteViewSet()
+        view.request = request
+
+        self.assertTrue(view._tenant_samples_queryset().filter(pk=self.sample.pk).exists())
+        self.assertFalse(view._tenant_samples_queryset().filter(pk=other_sample.pk).exists())
+
     def test_dashboard_uses_lightweight_report_read_model(self):
         self.user.is_superuser = True
         self.user.save(update_fields=["is_superuser"])

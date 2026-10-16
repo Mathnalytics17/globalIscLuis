@@ -7,6 +7,7 @@ import zipfile
 from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import UUID
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.core.files.storage import default_storage
@@ -19,6 +20,7 @@ from django.template.loader import get_template
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from xhtml2pdf import pisa
@@ -36,6 +38,8 @@ from apps.reporte.api.serializers.index import (
 )
 from apps.resultado.api.views.index import _sample_tests_for_lote
 from apps.users.api.models.index import User
+from apps.users.api.services import audit_user_action
+from PIL import Image, UnidentifiedImageError
 
 logger = logging.getLogger(__name__)
 
@@ -287,19 +291,56 @@ def _report_recipient_emails(reporte):
     return emails
 
 
-def _save_signature_base64(data_url):
+MAX_SIGNATURE_BYTES = 2 * 1024 * 1024
+ALLOWED_SIGNATURE_FORMATS = {"PNG": ".png", "JPEG": ".jpg"}
+
+
+def _normalise_signature_path(value):
+    """Return a storage-relative signature path, rejecting traversal and foreign URLs."""
+    if not value or not isinstance(value, str):
+        return ""
+    parsed = urlparse(value)
+    if parsed.scheme or parsed.netloc:
+        return ""
+    path = parsed.path.removeprefix(getattr(settings, "MEDIA_URL", "/media/")).lstrip("/")
+    normalised = os.path.normpath(path).replace("\\", "/")
+    if normalised.startswith("../") or normalised == "..":
+        return ""
+    if not normalised.startswith(("firmas/", "firmas_usuarios/")):
+        return ""
+    return normalised
+
+
+def _validate_signature_image(content):
+    if not content or len(content) > MAX_SIGNATURE_BYTES:
+        raise ValidationError({"firma": "La firma debe ser una imagen de máximo 2 MB."})
+    try:
+        image = Image.open(io.BytesIO(content))
+        image.verify()
+        extension = ALLOWED_SIGNATURE_FORMATS.get(image.format)
+    except (UnidentifiedImageError, OSError, ValueError):
+        extension = None
+    if not extension:
+        raise ValidationError({"firma": "Solo se permiten imágenes PNG o JPEG válidas."})
+    return extension
+
+
+def _save_signature_base64(data_url, user):
     if not data_url:
         return ""
     if not isinstance(data_url, str) or "base64," not in data_url:
         return ""
     try:
         header, encoded = data_url.split("base64,", 1)
-        extension = ".png"
-        if "jpeg" in header or "jpg" in header:
-            extension = ".jpg"
+        if not header.lower().startswith("data:image/"):
+            return ""
+        content = base64.b64decode(encoded, validate=True)
+        extension = _validate_signature_image(content)
         filename = f"firma_dibujada_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{extension}"
-        saved_path = default_storage.save(os.path.join("firmas", filename), io.BytesIO(base64.b64decode(encoded)))
+        saved_path = default_storage.save(os.path.join("firmas", str(user.pk), filename), io.BytesIO(content))
         return getattr(settings, "MEDIA_URL", "/media/") + saved_path
+    except (ValueError, ValidationError):
+        return ""
     except Exception:
         logger.exception("No se pudo guardar firma dibujada")
         return ""
@@ -307,7 +348,7 @@ def _save_signature_base64(data_url):
 
 def _default_signature_path(user):
     signature = getattr(user, "firma_predeterminada", None)
-    return getattr(signature, "name", "") if signature else ""
+    return _normalise_signature_path(getattr(signature, "name", "")) if signature else ""
 
 
 class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
@@ -365,6 +406,9 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         muestra_id = self.request.query_params.get("muestra")
         lote_id = self.request.query_params.get("lote")
         empresa_id = self.request.query_params.get("empresa")
+        client_id = self.request.query_params.get("client_id")
+        machine_id = self.request.query_params.get("machine_id")
+        sampling_point_id = self.request.query_params.get("sampling_point_id")
         estado = self.request.query_params.get("estado")
         visible_cliente = self.request.query_params.get("visible_cliente")
         fecha_generacion_desde = self.request.query_params.get("fecha_generacion_desde")
@@ -377,8 +421,15 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(muestra_id=muestra_id)
         if lote_id:
             queryset = queryset.filter(lote_id=lote_id)
-        if empresa_id:
-            queryset = queryset.filter(lote__cliente_empresa_id=empresa_id)
+        if empresa_id or client_id:
+            queryset = queryset.filter(lote__cliente_empresa_id=empresa_id or client_id)
+        if machine_id:
+            queryset = queryset.filter(muestra__referencia_equipo_id=machine_id)
+        if sampling_point_id:
+            queryset = queryset.filter(
+                muestra__asignaciones_punto_muestreo__punto_muestreo_id=sampling_point_id,
+                muestra__asignaciones_punto_muestreo__activa=True,
+            )
         if estado:
             queryset = queryset.filter(estatus=estado)
         if visible_cliente in ["true", "false"]:
@@ -398,9 +449,33 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 | Q(lote_id__icontains=search)
                 | Q(lote__cliente_empresa__nombre__icontains=search)
                 | Q(lote__cliente_ocasional_nombre__icontains=search)
+                | Q(muestra__referencia_equipo__nombre__icontains=search)
+                | Q(muestra__referencia_equipo__codigo_equipo__icontains=search)
+                | Q(muestra__asignaciones_punto_muestreo__punto_muestreo__nombre__icontains=search)
             )
 
         return queryset.distinct()
+
+    def _tenant_samples_queryset(self):
+        """Return samples visible to the caller, including tenant isolation."""
+        queryset = Muestra.objects.select_related(
+            "lote", "lote__cliente_empresa", "lote__tipo_gestion", "referencia_equipo"
+        )
+        user = self.request.user
+        if user.is_superuser or user.role == User.Role.GLOBAL:
+            return queryset
+        if not user.empresa_id:
+            return queryset.none()
+        return queryset.filter(lote__cliente_empresa_id=user.empresa_id)
+
+    def _tenant_batches_queryset(self):
+        queryset = LoteMuestras.objects.select_related("cliente_empresa")
+        user = self.request.user
+        if user.is_superuser or user.role == User.Role.GLOBAL:
+            return queryset
+        if not user.empresa_id:
+            return queryset.none()
+        return queryset.filter(cliente_empresa_id=user.empresa_id)
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
@@ -408,6 +483,15 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         return ReporteSerializer
 
     def perform_create(self, serializer):
+        muestra = serializer.validated_data.get("muestra")
+        lote = serializer.validated_data.get("lote")
+        if muestra and not self._tenant_samples_queryset().filter(pk=muestra.pk).exists():
+            self.permission_denied(self.request, message="No tiene acceso a la muestra indicada.")
+        if lote and not self._tenant_batches_queryset().filter(pk=lote.pk).exists():
+            self.permission_denied(self.request, message="No tiene acceso al lote indicado.")
+        if muestra and lote and muestra.lote_id != lote.pk:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({"lote": "El lote no corresponde a la muestra indicada."})
         now = timezone.now()
         serializer.save(usuario_emision=self.request.user, fecha_emision=now, fecha_generacion=now)
 
@@ -442,6 +526,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         reporte.estatus = "anulado"
         reporte.notas_internas = "\n".join(filter(None, [reporte.notas_internas, f"[Anulación] {reason}"]))
         reporte.save(update_fields=["estatus", "notas_internas"])
+        audit_user_action(request, "report.annulled", metadata={"report_id": reporte.pk})
         return Response({"detail": "Reporte anulado."})
 
     def _build_snapshot(self, muestra, request_user):
@@ -533,9 +618,10 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         firma_ruta = request.data.get("firma_ruta") or request.data.get("firma")
         firma_base64 = request.data.get("firma_base64")
         if not firma_ruta and firma_base64:
-            firma_ruta = _save_signature_base64(firma_base64)
+            firma_ruta = _save_signature_base64(firma_base64, request.user)
         if not firma_ruta:
             firma_ruta = _default_signature_path(request.user)
+        firma_ruta = _normalise_signature_path(firma_ruta)
         responsable = request.data.get("responsable") or _user_name(request.user)
 
         return Reporte.objects.create(
@@ -560,12 +646,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         if not muestra_id:
             return Response({"detail": "Debe enviar la muestra."}, status=status.HTTP_400_BAD_REQUEST)
 
-        muestra = (
-            Muestra.objects
-            .select_related("lote", "lote__cliente_empresa", "lote__tipo_gestion", "referencia_equipo")
-            .filter(pk=muestra_id)
-            .first()
-        )
+        muestra = self._tenant_samples_queryset().filter(pk=muestra_id).first()
         if not muestra:
             return Response({"detail": "Muestra no encontrada."}, status=status.HTTP_404_NOT_FOUND)
         if muestra.estado_operativo != "activa":
@@ -577,6 +658,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
         reporte = self._create_from_interpretation(muestra, request)
         _mark_lote_reported_if_ready(muestra.lote)
+        audit_user_action(request, "report.generated", metadata={"report_id": reporte.pk, "sample_id": muestra.pk})
         return Response(ReporteSerializer(reporte, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["post"], url_path="generate-batch-from-interpretation")
@@ -584,15 +666,12 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         lote_id = request.data.get("lote") or request.data.get("lote_id")
         if not lote_id:
             return Response({"detail": "Debe enviar el lote."}, status=status.HTTP_400_BAD_REQUEST)
-        lote = LoteMuestras.objects.filter(pk=lote_id).first()
+        lote = self._tenant_batches_queryset().filter(pk=lote_id).first()
         if not lote:
             return Response({"detail": "Lote no encontrado."}, status=status.HTTP_404_NOT_FOUND)
-        samples = list(
-            Muestra.objects
-            .select_related("lote", "lote__cliente_empresa", "lote__tipo_gestion", "referencia_equipo")
-            .filter(lote=lote, estado_operativo="activa")
-            .order_by("id")
-        )
+        samples = list(self._tenant_samples_queryset().filter(
+            lote=lote, estado_operativo="activa"
+        ).order_by("id"))
         not_reviewed = [sample.id for sample in samples if not sample.is_revisado]
         without_interpretation = [sample.id for sample in samples if not _has_interpretation(sample)]
         if not_reviewed or without_interpretation:
@@ -605,6 +684,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         with transaction.atomic():
             reports = [self._create_from_interpretation(sample, request) for sample in samples]
             _mark_lote_reported_if_ready(lote)
+        audit_user_action(request, "report.batch_generated", metadata={"batch_id": lote.pk, "report_count": len(reports)})
         return Response({
             "detail": f"Se generaron {len(reports)} reportes individuales para el lote {lote.id}.",
             "generated": len(reports),
@@ -621,16 +701,12 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         if not muestra_id:
             return Response({"detail": "Debe enviar la muestra."}, status=status.HTTP_400_BAD_REQUEST)
 
-        muestra = (
-            Muestra.objects
-            .select_related("lote", "lote__cliente_empresa", "lote__tipo_gestion", "referencia_equipo")
-            .filter(pk=muestra_id)
-            .first()
-        )
+        muestra = self._tenant_samples_queryset().filter(pk=muestra_id).first()
         if not muestra:
             return Response({"detail": "Muestra no encontrada."}, status=status.HTTP_404_NOT_FOUND)
 
         snapshot = self._build_snapshot(muestra, request.user)
+        audit_user_action(request, "report.previewed", metadata={"sample_id": muestra.pk})
         temp = Reporte(
             muestra=muestra,
             lote=muestra.lote,
@@ -770,6 +846,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         except Exception as exc:
             estado = "fallido"
             error = str(exc)
+            logger.exception("No se pudo enviar reporte por correo")
 
         reporte.fecha_envio = timezone.now()
         reporte.usuario_envio = request.user
@@ -883,9 +960,9 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             return error_response
         try:
             content, filename, content_type = self._batch_file(lote, reports, file_format)
-        except Exception as exc:
+        except Exception:
             logger.exception("No se pudo generar el archivo consolidado del lote")
-            return Response({"detail": "No se pudo generar el archivo del lote.", "error": str(exc)}, status=500)
+            return Response({"detail": "No se pudo generar el archivo del lote."}, status=500)
 
         response = HttpResponse(content, content_type=content_type)
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
@@ -930,7 +1007,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                         reporte=report, canal="email", destinatario_email=recipient,
                         enviado_por=request.user, estado="fallido", error=str(exc),
                     )
-            return Response({"detail": "No se pudo enviar el lote.", "error": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+            return Response({"detail": "No se pudo enviar el lote."}, status=status.HTTP_502_BAD_GATEWAY)
 
         now = timezone.now()
         for report in reports:
@@ -970,6 +1047,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         reporte.fecha_aprobacion = timezone.now()
         reporte.estatus = "aprobado"
         reporte.save(update_fields=["usuario_aprobacion", "fecha_aprobacion", "estatus"])
+        audit_user_action(request, "report.approved", metadata={"report_id": reporte.pk})
         return Response(ReporteSerializer(reporte, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"])
@@ -996,22 +1074,32 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                     "mime_type": mime,
                     "file_name": os.path.basename(file_path),
                 })
-        except Exception as exc:
+        except Exception:
             logger.exception("Error leyendo firma")
-            return Response({"error": str(exc)}, status=500)
+            return Response({"error": "No se pudo leer la firma."}, status=500)
 
     @action(detail=False, methods=["post"], url_path="upload-signature")
     def upload_signature(self, request):
         if "file" not in request.FILES:
             return Response({"error": "No se encontro ningun archivo en la solicitud"}, status=status.HTTP_400_BAD_REQUEST)
         file = request.FILES["file"]
-        if not file.content_type.startswith("image/"):
+        if file.content_type not in {"image/png", "image/jpeg"}:
             return Response({"error": "El archivo debe ser una imagen"}, status=status.HTTP_400_BAD_REQUEST)
-        if file.size > 2 * 1024 * 1024:
+        if file.size > MAX_SIGNATURE_BYTES:
             return Response({"error": "El archivo no puede ser mayor a 2MB"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            extension = _validate_signature_image(file.read())
+            file.seek(0)
+        except ValidationError as exc:
+            return Response(exc.detail, status=status.HTTP_400_BAD_REQUEST)
 
-        filename = f"firma_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{os.path.splitext(file.name)[1]}"
-        saved_path = default_storage.save(os.path.join(request.POST.get("folder", "firmas"), filename), file)
+        filename = f"firma_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{extension}"
+        saved_path = default_storage.save(os.path.join("firmas", str(request.user.pk), filename), file)
+        pending = list(request.session.get("pending_signature_paths", []))[-9:]
+        pending.append(saved_path)
+        request.session["pending_signature_paths"] = pending
+        request.session.modified = True
+        audit_user_action(request, "report.signature_uploaded", metadata={"path": saved_path})
         file_url = getattr(settings, "MEDIA_URL", "/media/") + saved_path
         return Response({"message": "Firma guardada exitosamente", "filePath": file_url, "fileName": filename, "savedPath": saved_path}, status=status.HTTP_201_CREATED)
 
@@ -1413,25 +1501,84 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         return _report_status(estado_limite)
 
     def _generar_pdf(self, html_content):
+        pdf_file = io.BytesIO()
         try:
-            pdf_file = io.BytesIO()
-
             def fetch_resources(uri, rel):
-                if uri.startswith("http://") or uri.startswith("https://"):
-                    return uri
-                for base_path in [getattr(settings, "STATIC_ROOT", None), getattr(settings, "MEDIA_ROOT", None), settings.BASE_DIR]:
-                    if base_path:
-                        full_path = os.path.join(str(base_path), uri.lstrip("/"))
-                        if os.path.exists(full_path):
-                            return full_path
-                return uri
+                """Resuelve recursos locales y permite imágenes embebidas en data URI."""
+                if not uri:
+                    return ""
 
-            pisa_status = pisa.CreatePDF(html_content, dest=pdf_file, encoding="UTF-8", link_callback=fetch_resources)
+                parsed = urlparse(uri)
+
+                # Las firmas se embeben como data:image/...;base64,... .
+                # xhtml2pdf puede procesarlas directamente; no deben convertirse
+                # en una ruta vacía por tener un scheme.
+                if parsed.scheme == "data":
+                    return uri
+
+                # No permitimos que la generación del PDF haga peticiones HTTP/HTTPS.
+                if parsed.scheme or parsed.netloc:
+                    logger.warning("Recurso remoto ignorado al generar PDF: %s", uri)
+                    return ""
+
+                path = parsed.path.lstrip("/")
+                if path.startswith("./"):
+                    path = path[2:]
+
+                media_root = str(settings.MEDIA_ROOT)
+                base_dir = str(settings.BASE_DIR)
+                report_templates_dir = os.path.join(base_dir, "apps", "media", "templates")
+
+                candidates = []
+                if path.startswith("static/"):
+                    candidates.append(
+                        os.path.join(str(settings.STATIC_ROOT), path.removeprefix("static/"))
+                    )
+                if path.startswith("media/"):
+                    media_path = path.removeprefix("media/")
+                    candidates.extend([
+                        os.path.join(media_root, media_path),
+                        os.path.join(report_templates_dir, media_path.removeprefix("templates/")),
+                    ])
+
+                # globalreport.html usa recursos relativos (./logo-globaloil.jpg, etc.).
+                candidates.extend([
+                    os.path.join(report_templates_dir, path),
+                    os.path.join(media_root, path),
+                    os.path.join(base_dir, path),
+                ])
+
+                for full_path in candidates:
+                    normalized = os.path.normpath(full_path)
+                    if os.path.isfile(normalized):
+                        return normalized
+
+                logger.warning(
+                    "No se encontró recurso para PDF: uri=%s rel=%s candidates=%s",
+                    uri,
+                    rel,
+                    candidates,
+                )
+                return ""
+
+            pisa_status = pisa.CreatePDF(
+                html_content,
+                dest=pdf_file,
+                encoding="UTF-8",
+                link_callback=fetch_resources,
+            )
             if pisa_status.err:
+                logger.error("xhtml2pdf reportó %s error(es) al generar el PDF", pisa_status.err)
                 return {"error": f"Error generando PDF: {pisa_status.err}"}
+
             content = pdf_file.getvalue()
-            pdf_file.close()
+            if not content or not content.startswith(b"%PDF"):
+                logger.error("xhtml2pdf no produjo un PDF válido (bytes=%s)", len(content or b""))
+                return {"error": "El generador no produjo un PDF válido."}
+
             return {"pdf": content}
-        except Exception as exc:
+        except Exception:
             logger.exception("Error generando PDF")
-            return {"error": str(exc)}
+            return {"error": "No se pudo generar el PDF."}
+        finally:
+            pdf_file.close()

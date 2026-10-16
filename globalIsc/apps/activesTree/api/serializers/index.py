@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.activesTree.api.models.index import Carpeta, PuntoMuestreo, AsignacionPuntoMuestreo
+from apps.activesTree.api.models.index import Carpeta, PuntoMuestreo, AsignacionPuntoMuestreo, Lubricante
 from apps.activesTree.api.models.machines.index import Maquina
 from apps.muestras.api.serializers.muestras.index import MuestraListSerializer
 from apps.users.api.models.index import User
@@ -98,12 +98,13 @@ class PuntoMuestreoSerializer(serializers.ModelSerializer):
     maquina_codigo = serializers.CharField(source='maquina.codigo_equipo', read_only=True)
     empresa_id = serializers.IntegerField(source='maquina.empresa_id', read_only=True)
     muestras_asociadas = serializers.SerializerMethodField()
+    lubricante_catalogo_info = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = PuntoMuestreo
         fields = [
             'id', 'maquina', 'maquina_nombre', 'maquina_codigo', 'empresa_id', 'nombre', 'codigo',
-            'descripcion', 'lubricante', 'frecuencia_cambio', 'unidad_frecuencia_cambio',
+            'descripcion', 'lubricante', 'lubricante_catalogo', 'lubricante_catalogo_info', 'frecuencia_cambio', 'unidad_frecuencia_cambio',
             'frecuencia_analisis', 'unidad_frecuencia_analisis', 'activo', 'muestras_asociadas', 'creado_por',
             'creado_en', 'actualizado_en',
         ]
@@ -111,6 +112,20 @@ class PuntoMuestreoSerializer(serializers.ModelSerializer):
 
     def get_muestras_asociadas(self, obj):
         return getattr(obj, 'muestras_asociadas', obj.asignaciones.filter(activa=True).count())
+
+    def get_lubricante_catalogo_info(self, obj):
+        item = obj.lubricante_catalogo
+        if not item:
+            return None
+        return {'id': item.id, 'nombre': item.nombre, 'fabricante': item.fabricante, 'referencia': item.referencia}
+
+    def validate(self, attrs):
+        catalogo = attrs.get('lubricante_catalogo')
+        maquina = attrs.get('maquina') or getattr(self.instance, 'maquina', None)
+        # La etiqueta histórica queda sincronizada, sin obligar a migrar los datos viejos.
+        if catalogo:
+            attrs['lubricante'] = catalogo.nombre
+        return attrs
 
     def validate_maquina(self, maquina):
         request = self.context.get('request')
@@ -120,6 +135,28 @@ class PuntoMuestreoSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError('La maquina no pertenece a su empresa.')
         return maquina
 
+
+class LubricanteSerializer(serializers.ModelSerializer):
+    # La API no expone "nombre" como campo de captura: se construye con la
+    # identidad real del producto (fabricante + referencia).
+    nombre = serializers.CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model = Lubricante
+        fields = ['id', 'nombre', 'fabricante', 'referencia', 'activo', 'creado_en', 'actualizado_en']
+        read_only_fields = ['creado_en', 'actualizado_en']
+        extra_kwargs = {'nombre': {'required': False, 'allow_blank': True}}
+        validators = []
+
+    def validate(self, attrs):
+        fabricante = (attrs.get('fabricante') or getattr(self.instance, 'fabricante', '')).strip()
+        referencia = (attrs.get('referencia') or getattr(self.instance, 'referencia', '')).strip()
+        if not fabricante or not referencia:
+            raise serializers.ValidationError({'referencia': 'Fabricante y referencia / marca son obligatorios.'})
+        # Nombre es técnico/interno; la identidad visible del lubricante es la
+        # pareja fabricante + referencia, nunca un tercer campo ambiguo.
+        attrs['nombre'] = f'{fabricante} {referencia}'.strip()
+        return attrs
 
 class AsignacionPuntoMuestreoSerializer(serializers.ModelSerializer):
     muestra_id = serializers.CharField(source='muestra.id', read_only=True)

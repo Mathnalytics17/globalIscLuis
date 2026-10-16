@@ -61,6 +61,7 @@ backups/
 
 # Archivos estáticos y medios (pueden generarse)
 /staticfiles/
+/globalIsc/staticfiles/
 /mediafiles/
 /static/
 /media/

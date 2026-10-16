@@ -5,7 +5,7 @@ from django.db.models import Q
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.muestras.index import Muestra
 from apps.activesTree.api.models.machines.index import Maquina
-from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, PuntoMuestreo
+from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, PuntoMuestreo, Lubricante
 from apps.users.api.models.index import User
 from apps.muestras.api.serializers.muestras.index import MuestraListSerializer, MuestraSerializer
 from apps.misc.api.serializers.tipoGestionMuestra.index import TipoGestionMuestraSerializer
@@ -20,6 +20,10 @@ class MuestraLoteCreateSerializer(serializers.ModelSerializer):
     punto_muestreo = serializers.PrimaryKeyRelatedField(
         queryset=PuntoMuestreo.objects.filter(activo=True), required=False, write_only=True
     )
+    lubricante_catalogo = serializers.PrimaryKeyRelatedField(
+        queryset=Lubricante.objects.filter(activo=True), required=False, allow_null=True, write_only=True
+    )
+    lubricante_nuevo = serializers.CharField(required=False, allow_blank=True, allow_null=True, write_only=True, max_length=150)
     class Meta:
         model = Muestra
         fields = [
@@ -32,6 +36,8 @@ class MuestraLoteCreateSerializer(serializers.ModelSerializer):
             "equipo_placa",
             "referencia_equipo",
             "punto_muestreo",
+            "lubricante_catalogo",
+            "lubricante_nuevo",
             "periodo_servicio_aceite",
             "unidad_periodo_aceite",
             "periodo_servicio_equipo",
@@ -49,6 +55,7 @@ class MuestraLoteCreateSerializer(serializers.ModelSerializer):
 
         referencia_equipo = attrs.get("referencia_equipo")
         punto_muestreo = attrs.get("punto_muestreo")
+        lubricante_catalogo = attrs.get("lubricante_catalogo")
         equipo_placa = attrs.get("equipo_placa")
 
         if punto_muestreo:
@@ -82,6 +89,8 @@ class LoteMuestrasListSerializer(serializers.ModelSerializer):
     tipos_muestras = serializers.SerializerMethodField()
     acciones_disponibles = serializers.SerializerMethodField()
     muestras_coincidentes = serializers.SerializerMethodField()
+    equipo_resumen = serializers.SerializerMethodField()
+    punto_muestreo_resumen = serializers.SerializerMethodField()
     tipo_gestion_info = TipoGestionMuestraSerializer(
     source="tipo_gestion",
     read_only=True
@@ -114,6 +123,8 @@ class LoteMuestrasListSerializer(serializers.ModelSerializer):
             "tipos_muestras",
             "acciones_disponibles",
             "muestras_coincidentes",
+            "equipo_resumen",
+            "punto_muestreo_resumen",
             "tipo_gestion",
             "tipo_gestion_info",
         ]
@@ -123,6 +134,23 @@ class LoteMuestrasListSerializer(serializers.ModelSerializer):
 
     def get_muestras_coincidentes(self, obj):
         return getattr(obj, 'muestras_coincidentes_db', None)
+
+    def get_equipo_resumen(self, obj):
+        names = []
+        for muestra in obj.muestras.all():
+            equipo = getattr(muestra, "referencia_equipo", None)
+            label = getattr(equipo, "nombre", None) or getattr(equipo, "codigo_equipo", None) or muestra.equipo_placa
+            if label and label not in names:
+                names.append(label)
+        return " · ".join(names[:3]) or "Sin equipo"
+
+    def get_punto_muestreo_resumen(self, obj):
+        names = []
+        for muestra in obj.muestras.all():
+            for assignment in muestra.asignaciones_punto_muestreo.all():
+                if assignment.activa and assignment.punto_muestreo.nombre not in names:
+                    names.append(assignment.punto_muestreo.nombre)
+        return " · ".join(names[:3]) or "Sin punto"
 
     def get_cliente_nombre(self, obj):
         if obj.tipo_cliente == "registrado" and obj.cliente_empresa:
@@ -285,6 +313,30 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
         muestra_data["referencia_equipo"] = machine
         return muestra_data
 
+    def _resolve_lubricant(self, lote, muestra_data):
+        """A new name from reception becomes reusable, without altering any point."""
+        catalogo = muestra_data.pop('lubricante_catalogo', None)
+        nuevo = (muestra_data.pop('lubricante_nuevo', None) or '').strip()
+        if not catalogo:
+            campos = muestra_data.get('campos_adicionales') or {}
+            fabricante = (campos.get('fabricante') or '').strip() or 'Sin fabricante'
+            referencia = (muestra_data.get('referencia_marca') or nuevo or '').strip()
+            if referencia:
+                catalogo, _ = Lubricante.objects.get_or_create(
+                    fabricante=fabricante,
+                    referencia=referencia,
+                    defaults={'nombre': f'{fabricante} {referencia}'},
+                )
+        if catalogo:
+            muestra_data['referencia_marca'] = catalogo.referencia or catalogo.nombre
+            campos = muestra_data.get('campos_adicionales') or {}
+            if catalogo.fabricante:
+                campos['fabricante'] = catalogo.fabricante
+            campos['lubricante_catalogo_id'] = catalogo.id
+            campos['lubricante_nombre'] = catalogo.nombre
+            muestra_data['campos_adicionales'] = campos
+        return muestra_data
+
     @transaction.atomic
     def create(self, validated_data):
         request = self.context.get("request")
@@ -303,6 +355,7 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
             muestra_data.pop("usuario_registro", None)
             muestra_data.pop("lote", None)
             muestra_data = self._resolve_manual_machine(lote, muestra_data)
+            muestra_data = self._resolve_lubricant(lote, muestra_data)
 
             muestra = Muestra.objects.create(
                 lote=lote,
@@ -360,6 +413,7 @@ class AddMuestrasToLoteSerializer(serializers.Serializer):
             muestra_data.pop("contacto_cliente", None)
             muestra_data.pop("usuario_registro", None)
             muestra_data.pop("lote", None)
+            muestra_data = LoteMuestrasCreateSerializer()._resolve_lubricant(lote, muestra_data)
             if not muestra_data.get("referencia_equipo") and muestra_data.get("equipo_placa") and lote.cliente_empresa_id:
                 placa = str(muestra_data.get("equipo_placa") or "").strip()
                 machine = (

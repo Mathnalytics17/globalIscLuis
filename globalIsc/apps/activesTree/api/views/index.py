@@ -8,15 +8,12 @@ from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView
 from apps.utils.pagination import StandardResultsSetPagination
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
-from apps.users.api.services import user_has_permission
 
-from apps.activesTree.api.models.index import Carpeta, PuntoMuestreo, AsignacionPuntoMuestreo
+from apps.activesTree.api.models.index import Carpeta, PuntoMuestreo, AsignacionPuntoMuestreo, Lubricante
 from apps.activesTree.api.models.machines.index import Maquina
-from apps.misc.api.models.companies.index import Empresa
 from apps.muestras.api.models.muestras.index import Muestra
 
 from ..serializers.index import (
@@ -25,56 +22,10 @@ from ..serializers.index import (
     MaquinaSerializer,
     PuntoMuestreoSerializer,
     AsignacionPuntoMuestreoSerializer,
+    LubricanteSerializer,
 )
 
 logger = logging.getLogger(__name__)
-
-
-class SyncCompanyRootFolders(APIView):
-    permission_classes = [IsAuthenticated, DenyReadOnlyWrite]
-
-    def post(self, request):
-        if not (request.user.is_superuser or request.user.role == User.Role.GLOBAL or user_has_permission(request.user, "activos.sincronizar_carpetas")):
-            self.permission_denied(request, message="No tiene permisos para sincronizar carpetas.")
-        try:
-            with transaction.atomic():
-                companies = Empresa.objects.filter(is_active=True)
-                existing_company_ids = Carpeta.objects.filter(
-                    typeFolder='root',
-                ).values_list('compania_id', flat=True)
-                companies_without_root = companies.exclude(id__in=existing_company_ids)
-
-                created_folders = []
-                for company in companies_without_root:
-                    folder = Carpeta.objects.create(
-                        nombre=company.nombre,
-                        typeFolder='root',
-                        compania=company,
-                        id_parent_node='-1',
-                        isMachine=False,
-                        is_pt_medida=False,
-                    )
-                    created_folders.append({
-                        'id': folder.id,
-                        'nombre': folder.nombre,
-                        'empresa_id': company.id,
-                        'empresa_nombre': company.nombre,
-                    })
-
-                return Response({
-                    'success': True,
-                    'message': f'Se crearon {len(created_folders)} carpetas root',
-                    'created_folders': created_folders,
-                    'total_empresas': companies.count(),
-                    'empresas_sin_carpeta': len(created_folders),
-                })
-        except Exception as exc:
-            logger.exception('Error sincronizando carpetas root')
-            return Response({
-                'success': False,
-                'error': str(exc),
-                'message': 'Error al sincronizar carpetas root',
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class FolderViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
@@ -153,8 +104,12 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             queryset = queryset.prefetch_related(
                 'muestra_set',
                 'muestra_set__referencia_equipo',
+                # La muestra conserva su punto de medición: un equipo puede tener
+                # varios circuitos y mezclar sus tendencias daría una lectura falsa.
+                'muestra_set__asignaciones_punto_muestreo__punto_muestreo',
                 'muestra_set__referencia_equipo__empresa',
                 'muestra_set__resultados',
+                'muestra_set__resultados__resultados',
                 'muestra_set__resultados__prueba',
             )
         return queryset
@@ -194,7 +149,7 @@ class PuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     }
 
     def get_queryset(self):
-        queryset = PuntoMuestreo.objects.select_related('maquina', 'maquina__empresa').annotate(
+        queryset = PuntoMuestreo.objects.select_related('maquina', 'maquina__empresa', 'lubricante_catalogo').annotate(
             muestras_asociadas=Count('asignaciones', filter=Q(asignaciones__activa=True)),
         )
         user = self.request.user
@@ -289,6 +244,24 @@ class PuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 'omitidas': len(incompatible),
             },
         })
+
+
+class LubricanteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
+    serializer_class = LubricanteSerializer
+    permission_classes = [IsAuthenticated, DenyReadOnlyWrite, HasSecurityPermission]
+    # Alta rápida desde recepción: quien puede crear muestras puede registrar el
+    # lubricante que llegó. La edición de puntos sigue siendo un permiso aparte.
+    permission_action_map = {
+        'list': 'activos.ver', 'retrieve': 'activos.ver',
+        'create': 'muestras.crear', 'update': 'activos.gestionar_puntos',
+        'partial_update': 'activos.gestionar_puntos', 'destroy': 'activos.gestionar_puntos',
+    }
+
+    def get_queryset(self):
+        queryset = Lubricante.objects.all()
+        if self.request.query_params.get('include_inactive') not in ('1', 'true', 'True'):
+            queryset = queryset.filter(activo=True)
+        return queryset
 
 
 class AsignacionPuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ReadOnlyModelViewSet):

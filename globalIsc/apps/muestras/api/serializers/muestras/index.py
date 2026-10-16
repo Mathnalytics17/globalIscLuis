@@ -1,7 +1,10 @@
+import json
+
 from django.db import transaction
 from rest_framework import serializers
 
 from apps.muestras.api.models.muestras.index import HistorialMuestra, Muestra
+from apps.users.api.models.index import User
 from apps.muestras.api.serializers.muestraAtributoTecnico.index import (
     MuestraAtributoTecnicoSerializer,
     replace_sample_attributes,
@@ -22,6 +25,16 @@ class CreateMuestraSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, attrs):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        lote = attrs.get("lote") or getattr(self.instance, "lote", None)
+        equipo = attrs.get("referencia_equipo") or getattr(self.instance, "referencia_equipo", None)
+        if user and not (user.is_superuser or user.role == User.Role.GLOBAL):
+            if lote and lote.cliente_empresa_id != user.empresa_id:
+                raise serializers.ValidationError({"lote": "No tiene acceso a este lote."})
+            if equipo and equipo.empresa_id != user.empresa_id:
+                raise serializers.ValidationError({"referencia_equipo": "No tiene acceso a esta máquina."})
+
         tipo_muestra = attrs.get("tipo_muestra") or getattr(self.instance, "tipo_muestra", None)
         attributes_were_sent = "atributos_tecnicos" in attrs
         sample_type_changed = self.instance is not None and "tipo_muestra" in attrs
@@ -174,15 +187,30 @@ class MuestraListSerializer(serializers.ModelSerializer):
         data = []
         for prueba_muestra in obj.resultados.all():
             prueba = prueba_muestra.prueba
+            prefetched_results = getattr(prueba_muestra, "_prefetched_objects_cache", {}).get("resultados")
+            latest_result = max(
+                list(prefetched_results or []),
+                key=lambda item: ((item.fecha_actualizacion or item.fecha_registro or item.fecha_medicion), item.id),
+                default=None,
+            )
+            payload = None
+            if latest_result:
+                try:
+                    payload = json.loads(latest_result.resultado)
+                except (TypeError, ValueError):
+                    payload = None
             data.append({
                 "id": prueba_muestra.id,
                 "valor": prueba_muestra.valor,
                 "unidad": prueba_muestra.unidad,
                 "estatus": prueba_muestra.estatus,
                 "completada": prueba_muestra.completada,
+                "aplicar_limites": prueba_muestra.aplicar_limites,
                 "estado_limite": prueba_muestra.estado_limite,
                 "evaluacion_limite": prueba_muestra.evaluacion_limite,
                 "configuracion_resultados": prueba_muestra.configuracion_resultados or {},
+                "resultado_payload": payload,
+                "fecha_medicion": latest_result.fecha_medicion if latest_result else prueba_muestra.fecha_medicion,
                 "prueba": {
                     "id": prueba.id,
                     "nombre_variable": prueba.nombre_variable,

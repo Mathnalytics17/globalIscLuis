@@ -6,7 +6,7 @@
 <style>
   @page {
     size: 8.5in 11in;
-    margin: 0.48in 0.52in 0.42in 0.52in;
+    margin: 0.38in 0.40in 0.34in 0.40in;
   }
 
   html, body {
@@ -22,9 +22,8 @@
   }
 
   .report-page {
-    width: 7.46in;
-    max-width: 7.46in;
-    margin: 0 auto;
+    width: 100%;
+    margin: 0;
   }
 
   table {
@@ -33,15 +32,15 @@
   }
 
   td, th {
-    border: 0.8pt solid #000;
-    padding: 1.8px 2.8px;
+    border: 0.7pt solid #000;
+    padding: 1.1px 2px;
     vertical-align: middle;
-    line-height: 1.08;
+    line-height: 1.0;
   }
 
   .header {
     margin-top: 0;
-    margin-bottom: 7px;
+    margin-bottom: 4px;
   }
 
   .header-logo-cell {
@@ -111,11 +110,13 @@
 
   .info {
     margin-top: 0;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
 
   .info td {
-    font-size: 8.7pt;
+    font-size: 8.1pt;
+    padding-top: 1.2px;
+    padding-bottom: 1.2px;
   }
 
   .label {
@@ -127,31 +128,34 @@
   }
 
   .results {
+    width: 100%;
     table-layout: fixed;
+    page-break-inside: auto;
   }
 
   .results th {
     text-align: center;
-    font-size: 8.9pt;
+    font-size: 7.8pt;
     font-weight: bold;
-    padding: 2px 2.6px;
+    padding: 1.2px 1.5px;
+    line-height: 1.0;
   }
 
   .results td {
-    font-size: 8.2pt;
-    padding: 2px 2.5px;
-    line-height: 1.08;
+    font-size: 7.35pt;
+    padding: 1px 1.5px;
+    line-height: 1.0;
     overflow-wrap: break-word;
     word-wrap: break-word;
   }
 
   .analysis-main {
-    width: 11%;
+    width: 9%;
     text-align: left;
   }
 
   .analysis-sub {
-    width: 13%;
+    width: 10%;
     text-align: left;
   }
 
@@ -160,22 +164,24 @@
   }
 
   .result-col {
-    width: 13%;
+    width: 12%;
   }
 
   .unit-col {
-    width: 6%;
+    width: 5%;
   }
 
   .limit-col {
-    width: 13%;
-    font-size: 6.9pt;
+    width: 15%;
+    font-size: 6.35pt;
+    line-height: 0.98;
   }
 
   .comment-col {
-    width: 10%;
+    width: 11%;
     font-weight: bold;
-    font-size: 8.1pt;
+    font-size: 7pt;
+    line-height: 0.98;
   }
 
   .center {
@@ -187,13 +193,13 @@
   }
 
   .legend {
-    margin: 0 0 4px 0;
+    margin: 0 0 2px 0;
   }
 
   .legend td {
     border: 0;
-    padding: 1px 5px;
-    font-size: 7.3pt;
+    padding: 0.5px 3px;
+    font-size: 6.8pt;
   }
 
   .legend-swatch {
@@ -277,8 +283,9 @@
 
   .status-detail {
     display: block;
-    margin-top: 2px;
-    font-size: 6.8pt;
+    margin-top: 0.5px;
+    font-size: 6.1pt;
+    line-height: 0.95;
     font-weight: normal;
   }
 
@@ -448,13 +455,14 @@
         {% if grupo.list|length > 1 %}
           {% for row in grupo.list %}
             <tr>
-              {% if forloop.first %}
-                <td class="analysis-main" rowspan="{{ grupo.list|length }}">{{ grupo.grouper }}</td>
-              {% endif %}
+              {# No usamos rowspan: ReportLab/xhtml2pdf no puede dividir una tabla entre páginas si un rowspan grande cruza el punto de corte. #}
+              <td class="analysis-main">
+                {% if forloop.first %}{{ grupo.grouper }}{% else %}&nbsp;{% endif %}
+              </td>
               <td class="analysis-sub">{{ row.subanalisis|default:"-" }}</td>
-              {% if forloop.first %}
-                <td class="center method-col" rowspan="{{ grupo.list|length }}">{{ grupo.list.0.metodo|default:"-" }}</td>
-              {% endif %}
+              <td class="center method-col">
+                {% if forloop.first %}{{ grupo.list.0.metodo|default:"-" }}{% else %}&nbsp;{% endif %}
+              </td>
               <td class="result-col">
                 {% if row.display_tokens %}
                   <div class="result-layout">

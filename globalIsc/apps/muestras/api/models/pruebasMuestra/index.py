@@ -59,6 +59,10 @@ class PruebaMuestra(models.Model):
         blank=True,
         help_text="Unidad y condicion aplicadas por cada resultado de la prueba.",
     )
+    aplicar_limites = models.BooleanField(
+        default=True,
+        help_text="Define si esta asignación se evalúa contra límites o solo registra resultados.",
+    )
     lote_predefinido = models.ForeignKey(
         LotePruebasPredefinido,
         on_delete=models.SET_NULL,
@@ -72,6 +76,14 @@ class PruebaMuestra(models.Model):
         blank=True,
         null=True,
         related_name='pruebas_muestra',
+    )
+    fuente_limite = models.ForeignKey(
+        "misc.PruebaFuenteLimite",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        related_name="pruebas_muestra_versionadas",
+        help_text="Versión de límites fijada cuando se asignó la prueba.",
     )
     criterio_limite_catalogo = models.ForeignKey(
         CatalogoTecnico,

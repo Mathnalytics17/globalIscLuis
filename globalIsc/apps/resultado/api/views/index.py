@@ -490,9 +490,16 @@ def _sample_equipment_label(muestra):
 def _sample_review_status(muestra, tests):
     if not tests:
         return "Sin pruebas"
+    evaluated_tests = [test for test in tests if test.get("aplicar_limites", True)]
+    if not evaluated_tests:
+        if all(t.get("is_revisada") for t in tests):
+            return "Revisada"
+        if any(t.get("resultado") for t in tests):
+            return "Pendiente"
+        return "Sin evaluación técnica"
     statuses = {
         _canonical_status(test.get("estado_tecnico") or test.get("estado_limite"))
-        for test in tests
+        for test in evaluated_tests
     }
     if "CRITICO" in statuses:
         return "Crítica"
@@ -605,6 +612,7 @@ def _evaluation_status_label(estado):
         "SIN_INFORMACION_TECNICA": "SIN INFO TÉCNICA",
         "SIN_LIMITE_CONFIGURADO": "SIN LÍMITE CONFIGURADO",
         "SIN_LIMITE": "SIN LÍMITE",
+        "SIN_LIMITES": "SIN LÍMITES CONTRATADOS",
         "SIN_RESULTADO": "SIN RESULTADO",
         "SIN_CRITERIO": "SIN CRITERIO",
         "NO_EVALUABLE": "NO EVALUABLE",
@@ -627,6 +635,9 @@ def _canonical_status(value):
         "INFORMATIVO": "INFORMATIVO",
         "SIN_LIMITE": "SIN_LIMITE",
         "SIN_LÍMITE": "SIN_LIMITE",
+        "SIN_LIMITES": "SIN_LIMITES",
+        "SIN_LÍMITES": "SIN_LIMITES",
+        "SIN_LÍMITES_CONTRATADOS": "SIN_LIMITES",
         "SIN_LIMITE_CONFIGURADO": "SIN_LIMITE_CONFIGURADO",
         "SIN_INFORMACION_TECNICA": "SIN_INFORMACION_TECNICA",
         "SIN_INFO_TECNICA": "SIN_INFORMACION_TECNICA",
@@ -640,7 +651,7 @@ def _is_bad_or_incomplete_evaluation(evaluation):
     if not evaluation:
         return True
     estado = _canonical_status(evaluation.get("estado") or evaluation.get("estado_label"))
-    if estado in ["NORMAL", "FUERA_DE_LIMITE", "INFORMATIVO"]:
+    if estado in ["NORMAL", "FUERA_DE_LIMITE", "INFORMATIVO", "SIN_LIMITES"]:
         return False
     # If there are useful comparable details, keep it even if aggregate label is imperfect.
     for detail in evaluation.get("details") or []:
@@ -888,6 +899,14 @@ def _evaluate_sample_test_limits(prueba_muestra, result=None):
     - details[] con resultado_valor, field_label, operator, limit_value, estado, passed
     - raw
     """
+    if not prueba_muestra.aplicar_limites:
+        return {
+            "estado": "SIN_LIMITES",
+            "estado_label": "SIN LÍMITES CONTRATADOS",
+            "summary": "Solo registro de resultados",
+            "details": [],
+            "raw": None,
+        }
     result = result or _active_result_for(prueba_muestra)
     if not result:
         return {
@@ -1202,6 +1221,7 @@ def _sample_tests_for_lote(lote, muestra_id=None, include_test_structure=True):
             "usuario_medicion": _user_payload(st.usuario_medicion) or (_result_payload(result).get("usuario_medicion") if result and _result_payload(result) else None),
             "estatus": st.estatus,
             "is_revisada": bool(st.is_revisada),
+            "aplicar_limites": st.aplicar_limites,
             "estado_tecnico": technical_status,
             "estado_tecnico_label": technical_label,
             "estado_limite": technical_label,
@@ -1436,7 +1456,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         compact_response=False,
     ):
         prueba_muestra = get_object_or_404(
-            PruebaMuestra.objects.select_related("muestra", "muestra__lote", "prueba"),
+            self._scope_sample_tests(PruebaMuestra.objects.select_related("muestra", "muestra__lote", "prueba")),
             pk=prueba_muestra_id,
         )
         if prueba_muestra.muestra.estado_operativo != "activa":
@@ -2211,6 +2231,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 ]
                 sample_review_tests = [
                     {
+                        "aplicar_limites": st.aplicar_limites,
                         "estado_tecnico": _canonical_status(
                             _evaluate_sample_test_limits(st, _active_result_for(st)).get("estado")
                         )
@@ -2315,6 +2336,13 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         })
 
     def _parse_result_excel(self, uploaded_file):
+        max_bytes = 10 * 1024 * 1024
+        max_sheets = 20
+        max_rows = 5000
+        if getattr(uploaded_file, "size", 0) > max_bytes:
+            return [], [], Response({"detail": "El archivo Excel no puede superar 10 MB."}, status=status.HTTP_400_BAD_REQUEST)
+        if not str(getattr(uploaded_file, "name", "")).lower().endswith(".xlsx"):
+            return [], [], Response({"detail": "Use un archivo .xlsx de la plantilla oficial."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             from openpyxl import load_workbook
         except Exception:
@@ -2324,7 +2352,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             )
 
         try:
-            wb = load_workbook(uploaded_file, data_only=True)
+            wb = load_workbook(uploaded_file, data_only=True, read_only=True)
         except Exception:
             return [], [], Response(
                 {"detail": "No se pudo leer el archivo Excel. Use una plantilla oficial .xlsx."},
@@ -2333,6 +2361,8 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
         ignored_sheets = {"Metadata", "_LISTAS", "Instrucciones"}
         data_sheets = [ws for ws in wb.worksheets if ws.title not in ignored_sheets and ws.sheet_state == "visible"]
+        if len(wb.worksheets) > max_sheets or any(ws.max_row > max_rows + 1 for ws in data_sheets):
+            return [], [], Response({"detail": "La plantilla excede el máximo de 20 hojas o 5.000 filas por hoja."}, status=status.HTTP_400_BAD_REQUEST)
         if not data_sheets:
             return [], [], Response(
                 {"detail": "El archivo no contiene hojas de resultados válidas."},
@@ -2567,14 +2597,14 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     def review_batch_detail(self, request, lote_id=None):
         lote_id = lote_id or request.query_params.get("lote")
         lote = get_object_or_404(
-            LoteMuestras.objects.select_related("cliente_empresa", "tipo_gestion").prefetch_related("muestras"),
+            self._scope_lotes(LoteMuestras.objects.select_related("cliente_empresa", "tipo_gestion").prefetch_related("muestras")),
             pk=lote_id,
         )
         return Response(_batch_review_payload(lote))
 
     @action(detail=False, methods=["get"])
     def result_history(self, request, resultado_id=None):
-        resultado = get_object_or_404(Resultado.objects.select_related("usuario_medicion", "prueba_muestra", "prueba_muestra__prueba"), pk=resultado_id)
+        resultado = get_object_or_404(self.get_queryset().select_related("usuario_medicion", "prueba_muestra", "prueba_muestra__prueba"), pk=resultado_id)
         history = []
         history.append({
             "id": f"initial-{resultado.id}",
@@ -2615,7 +2645,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def correct_result(self, request, resultado_id=None):
-        resultado = get_object_or_404(Resultado.objects.select_related("prueba_muestra", "prueba_muestra__muestra", "prueba_muestra__prueba"), pk=resultado_id)
+        resultado = get_object_or_404(self.get_queryset().select_related("prueba_muestra", "prueba_muestra__muestra", "prueba_muestra__prueba"), pk=resultado_id)
         justificacion = (request.data.get("justificacion") or request.data.get("motivo_cambio") or "").strip()
         if not justificacion:
             return Response({"detail": "La justificación es obligatoria para corregir un resultado."}, status=status.HTTP_400_BAD_REQUEST)
@@ -2684,7 +2714,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def mark_sample_test_reviewed(self, request, prueba_muestra_id=None):
-        prueba_muestra = get_object_or_404(PruebaMuestra.objects.select_related("muestra", "muestra__lote"), pk=prueba_muestra_id)
+        prueba_muestra = get_object_or_404(self._scope_sample_tests(PruebaMuestra.objects.select_related("muestra", "muestra__lote")), pk=prueba_muestra_id)
         if prueba_muestra.muestra.estado_operativo != "activa":
             return Response({"detail": "Una muestra invalidada no puede revisarse."}, status=status.HTTP_409_CONFLICT)
         require_batch_operation(prueba_muestra.muestra.lote, "revisar_resultados")
@@ -2720,7 +2750,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"])
     def complete_batch_review(self, request, lote_id=None):
-        lote = get_object_or_404(LoteMuestras.objects.prefetch_related("muestras"), pk=lote_id)
+        lote = get_object_or_404(self._scope_lotes(LoteMuestras.objects.prefetch_related("muestras")), pk=lote_id)
         require_batch_operation(lote, "revisar_resultados")
         incomplete_count = PruebaMuestra.objects.filter(
             muestra__lote=lote,
@@ -2773,7 +2803,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     def interpretation_batch_detail(self, request, lote_id=None):
         lote_id = lote_id or request.query_params.get("lote")
         lote = get_object_or_404(
-            LoteMuestras.objects.select_related("cliente_empresa", "tipo_gestion").prefetch_related("muestras"),
+            self._scope_lotes(LoteMuestras.objects.select_related("cliente_empresa", "tipo_gestion").prefetch_related("muestras")),
             pk=lote_id,
         )
         return Response(_batch_review_payload(lote))
@@ -2781,7 +2811,14 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def interpretation_sample(self, request, muestra_id=None):
         from apps.muestras.api.models.muestras.index import Muestra
-        muestra = get_object_or_404(Muestra.objects.select_related("lote", "referencia_equipo"), pk=muestra_id)
+        muestra = get_object_or_404(
+            self._scope_samples(
+                Muestra.objects.select_related("lote", "referencia_equipo").prefetch_related(
+                    "asignaciones_punto_muestreo__punto_muestreo",
+                )
+            ),
+            pk=muestra_id,
+        )
         tests = _sample_tests_for_lote(
             muestra.lote,
             muestra.id,
@@ -2801,6 +2838,10 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 evaluation.pop("details", None)
                 evaluation.pop("raw", None)
         interpretation = _get_interpretation_data(muestra)
+        point_assignment = next(
+            (item for item in muestra.asignaciones_punto_muestreo.all() if item.activa),
+            None,
+        )
         return Response({
             "muestra": {
                 "id": muestra.id,
@@ -2811,6 +2852,10 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 "tipo_muestra": muestra.tipo_muestra,
                 "referencia_marca": muestra.referencia_marca,
                 "is_revisado": muestra.is_revisado,
+                "punto_muestreo": {
+                    "id": point_assignment.punto_muestreo_id,
+                    "nombre": point_assignment.punto_muestreo.nombre,
+                } if point_assignment else None,
             },
             "sample_tests": tests,
             "predefined_comments": _build_predefined_comments(tests),
@@ -2825,7 +2870,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["patch", "post"])
     def save_interpretation_sample(self, request, muestra_id=None):
         from apps.muestras.api.models.muestras.index import Muestra
-        muestra = get_object_or_404(Muestra, pk=muestra_id)
+        muestra = get_object_or_404(self._scope_samples(Muestra.objects), pk=muestra_id)
         data = {
             "conclusion": request.data.get("conclusion") or "",
             "comentarios_predefinidos": request.data.get("comentarios_predefinidos") or [],
@@ -2841,10 +2886,28 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def interpretation_trends(self, request, muestra_id=None):
         from apps.muestras.api.models.muestras.index import Muestra
-        muestra = get_object_or_404(Muestra.objects.select_related("lote", "referencia_equipo"), pk=muestra_id)
+        from apps.activesTree.api.models.index import AsignacionPuntoMuestreo
+
+        muestra = get_object_or_404(
+            self._scope_samples(Muestra.objects.select_related("lote", "referencia_equipo")),
+            pk=muestra_id,
+        )
         prueba_filter = request.query_params.getlist("pruebas") or []
         related_samples = Muestra.objects.filter(lote__cliente_empresa=muestra.lote.cliente_empresa) if muestra.lote_id else Muestra.objects.all()
-        if muestra.referencia_equipo_id:
+        point_assignment = (
+            AsignacionPuntoMuestreo.objects
+            .filter(muestra=muestra, activa=True)
+            .select_related("punto_muestreo")
+            .first()
+        )
+        if point_assignment:
+            # El punto prevalece sobre la máquina. Solo si la muestra aún no fue
+            # clasificada se conserva la compatibilidad con el histórico por equipo.
+            related_samples = related_samples.filter(
+                asignaciones_punto_muestreo__punto_muestreo_id=point_assignment.punto_muestreo_id,
+                asignaciones_punto_muestreo__activa=True,
+            )
+        elif muestra.referencia_equipo_id:
             related_samples = related_samples.filter(referencia_equipo_id=muestra.referencia_equipo_id)
         elif muestra.equipo_placa:
             related_samples = related_samples.filter(equipo_placa=muestra.equipo_placa)
@@ -2941,6 +3004,11 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         return Response({
             "muestra": muestra.id,
             "equipo": _sample_equipment_label(muestra),
+            "punto_muestreo": {
+                "id": point_assignment.punto_muestreo_id,
+                "nombre": point_assignment.punto_muestreo.nombre,
+            } if point_assignment else None,
+            "alcance": "punto de medición" if point_assignment else "máquina",
             "groups": groups,
             "series": legacy_numeric_series,
         })

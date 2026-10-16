@@ -16,19 +16,23 @@ ASSIGNMENT_UPDATE_FIELDS = [
     "condicion_configurada",
     "unidad_configurada",
     "configuracion_resultados",
+    "aplicar_limites",
     "unidad",
     "estado_asignacion",
     "fecha_confirmacion",
     "lote_predefinido",
+    "fuente_limite",
     "criterio_evaluacion",
     "criterio_limite_catalogo",
     "criterio_limite_item",
     "criterio_limite_escala",
     "criterio_limite_escala_item",
     "criterio_limite_valor",
+    "aplicar_limites",
 ]
 
 CRITERION_UPDATE_FIELDS = [
+    "fuente_limite",
     "criterio_evaluacion",
     "criterio_limite_catalogo",
     "criterio_limite_item",
@@ -51,7 +55,7 @@ class AssignmentSyncResult:
 def _suggest_criterion(item, sample):
     if item.get("criterio_evaluacion"):
         return item.get("criterio_evaluacion")
-    source = PruebaFuenteLimite.objects.filter(
+    source = item.get("fuente_limite") or PruebaFuenteLimite.objects.filter(
         prueba=item["prueba"], activo=True, deleted_at__isnull=True,
         modo_seleccion="desde_muestra_editable",
     ).first()
@@ -75,10 +79,11 @@ def _suggest_sample_catalog_attribute(item, sample):
         return None
 
     source_qs = PruebaFuenteLimite.objects.filter(
-        prueba=item["prueba"],
-        activo=True,
-        deleted_at__isnull=True,
-    ).exclude(tipo_limite__in=["global", "sin_limite"]).select_related(
+        pk=item["fuente_limite"].pk,
+    ) if item.get("fuente_limite") else PruebaFuenteLimite.objects.filter(
+        prueba=item["prueba"], activo=True, deleted_at__isnull=True,
+    )
+    source_qs = source_qs.exclude(tipo_limite__in=["global", "sin_limite"]).select_related(
         "catalogo_fuente",
         "campo_tecnico_muestra",
         "campo_tecnico_muestra__catalogo",
@@ -127,6 +132,9 @@ def _assignment_values(item, *, sample, user, estado_asignacion, lote_predefinid
     inferred_item = inferred_attribute.item if inferred_attribute else None
     explicit_catalog = item.get("criterio_limite_catalogo")
     explicit_item = item.get("criterio_limite_item")
+    # Compatible con solicitudes en tránsito/anteriores al switch: solo False
+    # desactiva límites; null o ausencia conserva el comportamiento histórico.
+    aplicar_limites = item.get("aplicar_limites") is not False
     return {
         "usuario_solicitud_id": user.pk,
         "equipo_configurado_id": getattr(item.get("equipo_prueba"), "pk", None),
@@ -135,16 +143,18 @@ def _assignment_values(item, *, sample, user, estado_asignacion, lote_predefinid
         "condicion_configurada": item.get("condicion_texto"),
         "unidad_configurada": item.get("unidad"),
         "configuracion_resultados": item.get("configuracion_resultados") or {},
+        "aplicar_limites": aplicar_limites,
         "unidad": item.get("unidad"),
         "estado_asignacion": estado_asignacion,
         "fecha_confirmacion": confirmed_at,
         "lote_predefinido_id": getattr(lote_predefinido, "pk", None),
-        "criterio_evaluacion_id": getattr(_suggest_criterion(item, sample), "pk", None),
-        "criterio_limite_catalogo_id": getattr(explicit_catalog or inferred_catalog, "pk", None),
-        "criterio_limite_item_id": getattr(explicit_item or inferred_item, "pk", None),
-        "criterio_limite_escala_id": getattr(item.get("criterio_limite_escala"), "pk", None),
-        "criterio_limite_escala_item_id": getattr(item.get("criterio_limite_escala_item"), "pk", None),
-        "criterio_limite_valor": item.get("criterio_limite_valor"),
+        "fuente_limite_id": getattr(item.get("fuente_limite"), "pk", None) if aplicar_limites else None,
+        "criterio_evaluacion_id": getattr(_suggest_criterion(item, sample), "pk", None) if aplicar_limites else None,
+        "criterio_limite_catalogo_id": getattr(explicit_catalog or inferred_catalog, "pk", None) if aplicar_limites else None,
+        "criterio_limite_item_id": getattr(explicit_item or inferred_item, "pk", None) if aplicar_limites else None,
+        "criterio_limite_escala_id": getattr(item.get("criterio_limite_escala"), "pk", None) if aplicar_limites else None,
+        "criterio_limite_escala_item_id": getattr(item.get("criterio_limite_escala_item"), "pk", None) if aplicar_limites else None,
+        "criterio_limite_valor": item.get("criterio_limite_valor") if aplicar_limites else None,
     }
 
 
@@ -258,6 +268,7 @@ def synchronize_batch_assignments(*, lote, muestras, pruebas, estado_asignacion,
             "condicion_catalogo",
             "condicion_catalogo__unidad",
             "lote_predefinido",
+            "fuente_limite",
             "criterio_evaluacion",
             "criterio_evaluacion__fuente_limite",
             "criterio_limite_catalogo",

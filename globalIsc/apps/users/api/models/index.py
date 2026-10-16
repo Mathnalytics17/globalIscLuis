@@ -108,6 +108,7 @@ class User(AbstractUser):
         default=BlockScope.NONE,
         db_index=True,
     )
+    session_epoch = models.PositiveIntegerField(default=1)
     
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []

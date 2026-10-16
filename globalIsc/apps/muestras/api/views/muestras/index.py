@@ -1,7 +1,7 @@
 import logging
 
 from django.contrib.auth import get_user_model
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated
@@ -78,17 +78,19 @@ class MuestraViewSetList(ActionPermissionMixin, viewsets.ModelViewSet):
         user = self.request.user
         if user.is_superuser or user.role == User.Role.GLOBAL:
             return queryset
-        return queryset.filter(referencia_equipo__empresa=user.empresa)
+        return queryset.filter(
+            Q(lote__cliente_empresa=user.empresa) | Q(referencia_equipo__empresa=user.empresa)
+        ).distinct()
 
     def list(self, request, *args, **kwargs):
         try:
             queryset = self.filter_queryset(self.get_queryset())
             serializer = self.get_serializer(queryset, many=True)
             return Response(serializer.data)
-        except Exception as e:
+        except Exception:
             logger.exception("Error en MuestraViewSetList")
             return Response(
-                {"error": "Error interno del servidor", "detalle": str(e)},
+                {"error": "Error interno del servidor"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -113,7 +115,9 @@ class MuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         user = self.request.user
         if user.is_superuser or user.role == User.Role.GLOBAL:
             return queryset
-        return queryset.filter(referencia_equipo__empresa=user.empresa)
+        return queryset.filter(
+            Q(lote__cliente_empresa=user.empresa) | Q(referencia_equipo__empresa=user.empresa)
+        ).distinct()
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:

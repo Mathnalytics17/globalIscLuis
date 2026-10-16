@@ -21,6 +21,7 @@ from apps.misc.api.models.technicalCatalogs.index import Condicion, EquipoPrueba
 from apps.misc.api.serializers.pruebas.index import PruebaDetailSerializer, format_condition_label
 from apps.misc.api.serializers.technicalCatalogs.index import EquipoPruebaSerializer, MetodoEquipoSerializer
 from apps.users.api.serializers.index import UserSerializer
+from apps.users.api.models.index import User
 from apps.muestras.api.services.limit_engine import resolve_and_evaluate_sample_test_result
 
 
@@ -202,6 +203,18 @@ class CreatePruebaMuestraSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        muestra = attrs.get("muestra") or getattr(self.instance, "muestra", None)
+        if (
+            user
+            and muestra
+            and not (user.is_superuser or user.role == User.Role.GLOBAL)
+            and muestra.lote_id
+            and muestra.lote.cliente_empresa_id != user.empresa_id
+        ):
+            raise serializers.ValidationError({"muestra": "No tiene acceso a esta muestra."})
+
         prueba = attrs.get("prueba") or getattr(self.instance, "prueba", None)
         metodo = attrs.get("metodo_configurado") or getattr(self.instance, "metodo_configurado", None)
         equipo = attrs.get("equipo_configurado") or getattr(self.instance, "equipo_configurado", None)
@@ -242,7 +255,16 @@ class CreatePruebaMuestraSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _evaluate_limit(instance):
-        if instance.valor in [None, ""]:
+        if not instance.aplicar_limites:
+            instance.evaluacion_limite = {
+                "estado": "SIN_LIMITES",
+                "estado_label": "SIN LÍMITES CONTRATADOS",
+                "summary": "Solo registro de resultados",
+                "details": [],
+                "raw": None,
+            }
+            instance.estado_limite = "SIN LÍMITES CONTRATADOS"
+        elif instance.valor in [None, ""]:
             instance.evaluacion_limite = None
             instance.estado_limite = None
         else:
@@ -255,7 +277,27 @@ class CreatePruebaMuestraSerializer(serializers.ModelSerializer):
         instance.save(update_fields=["evaluacion_limite", "estado_limite"])
 
     def _validate_limit_criterion(self, attrs, prueba):
-        has_catalog_source = _has_catalog_limit_source(prueba)
+        aplicar_limites = attrs.get("aplicar_limites", getattr(self.instance, "aplicar_limites", True))
+        if not aplicar_limites:
+            attrs.update({
+                "fuente_limite": None,
+                "criterio_evaluacion": None,
+                "criterio_limite_catalogo": None,
+                "criterio_limite_item": None,
+                "criterio_limite_escala": None,
+                "criterio_limite_escala_item": None,
+                "criterio_limite_valor": None,
+            })
+            return
+        fuente_limite = attrs.get("fuente_limite") or getattr(self.instance, "fuente_limite", None)
+        if fuente_limite and prueba and fuente_limite.prueba_id != prueba.id:
+            raise serializers.ValidationError({"fuente_limite": "La versión de límites no pertenece a la prueba seleccionada."})
+        if not fuente_limite and prueba:
+            fuente_limite = PruebaFuenteLimite.objects.filter(
+                prueba=prueba, activo=True, deleted_at__isnull=True,
+            ).order_by("-version", "-id").first()
+            attrs["fuente_limite"] = fuente_limite
+        has_catalog_source = bool(fuente_limite) and fuente_limite.tipo_limite in ["catalogo", "campo_muestra", "seleccion_asignacion"]
         if not has_catalog_source:
             _discard_obsolete_catalog_selection(attrs)
         criterio_evaluacion = attrs.get("criterio_evaluacion") or getattr(self.instance, "criterio_evaluacion", None)
@@ -263,12 +305,7 @@ class CreatePruebaMuestraSerializer(serializers.ModelSerializer):
             criterio_evaluacion = None
         if not criterio_evaluacion and prueba and has_catalog_source:
             muestra = attrs.get("muestra") or getattr(self.instance, "muestra", None)
-            source = PruebaFuenteLimite.objects.filter(
-                prueba=prueba,
-                activo=True,
-                deleted_at__isnull=True,
-                modo_seleccion="desde_muestra_editable",
-            ).first()
+            source = fuente_limite if fuente_limite and fuente_limite.modo_seleccion == "desde_muestra_editable" else None
             if source and muestra:
                 selected_items = set(
                     muestra.atributos_tecnicos.filter(desconocido=False, item__isnull=False)
@@ -282,7 +319,7 @@ class CreatePruebaMuestraSerializer(serializers.ModelSerializer):
                         break
         if criterio_evaluacion:
             fuente = criterio_evaluacion.fuente_limite
-            if prueba and fuente.prueba_id != prueba.id:
+            if prueba and (fuente.prueba_id != prueba.id or (fuente_limite and fuente.pk != fuente_limite.pk)):
                 raise serializers.ValidationError({"criterio_evaluacion": "El criterio no pertenece a la prueba seleccionada."})
             if criterio_evaluacion.catalogo_item_id:
                 attrs["criterio_limite_item"] = criterio_evaluacion.catalogo_item
@@ -305,7 +342,7 @@ class CreatePruebaMuestraSerializer(serializers.ModelSerializer):
             criterio_catalogo = criterio_item.catalogo
             attrs["criterio_limite_catalogo"] = criterio_catalogo
         if criterio_catalogo and prueba and not PruebaFuenteLimite.objects.filter(
-            prueba=prueba,
+            pk=getattr(fuente_limite, "pk", None),
             catalogo_fuente=criterio_catalogo,
             tipo_limite__in=["catalogo", "campo_muestra", "seleccion_asignacion"],
             activo=True,
@@ -319,11 +356,11 @@ class CreatePruebaMuestraSerializer(serializers.ModelSerializer):
         if criterio_escala_item and not criterio_escala:
             criterio_escala = criterio_escala_item.escala
             attrs["criterio_limite_escala"] = criterio_escala
-        if criterio_escala and prueba and not _scale_limit_exists(prueba, criterio_escala) and criterio_catalogo:
+        if criterio_escala and prueba and not _scale_limit_exists(prueba, criterio_escala, fuente_limite) and criterio_catalogo:
             criterio_escala = None
             attrs["criterio_limite_escala"] = None
             attrs["criterio_limite_escala_item"] = None
-        if criterio_escala and prueba and not _scale_limit_exists(prueba, criterio_escala):
+        if criterio_escala and prueba and not _scale_limit_exists(prueba, criterio_escala, fuente_limite):
             raise serializers.ValidationError({
                 "criterio_limite_escala": "La escala seleccionada no es una fuente de limite global ordinal para esta prueba."
             })
@@ -333,6 +370,12 @@ class CreatePruebaMuestraSerializer(serializers.ModelSerializer):
 
 class BatchAssignPruebaItemSerializer(serializers.Serializer):
     prueba = serializers.PrimaryKeyRelatedField(queryset=Prueba.objects.filter(activo=True))
+    aplicar_limites = serializers.BooleanField(required=False, default=True)
+    fuente_limite = serializers.PrimaryKeyRelatedField(
+        queryset=PruebaFuenteLimite.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     equipo_prueba = serializers.PrimaryKeyRelatedField(queryset=EquipoPrueba.objects.filter(activo=True), required=False, allow_null=True)
     metodo_equipo = serializers.PrimaryKeyRelatedField(queryset=MetodoEquipo.objects.filter(activo=True), required=False, allow_null=True)
     condicion = serializers.PrimaryKeyRelatedField(queryset=Condicion.objects.filter(activo=True), required=False, allow_null=True)
@@ -368,6 +411,42 @@ class BatchAssignPruebaItemSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         prueba = attrs["prueba"]
+        # Solo el valor booleano False desactiva la evaluación. Esto protege
+        # asignaciones creadas por clientes anteriores que no envían el campo.
+        attrs["aplicar_limites"] = attrs.get("aplicar_limites") is not False
+        if not attrs["aplicar_limites"]:
+            attrs.update({
+                "fuente_limite": None,
+                "criterio_evaluacion": None,
+                "criterio_limite_catalogo": None,
+                "criterio_limite_item": None,
+                "criterio_limite_escala": None,
+                "criterio_limite_escala_item": None,
+                "criterio_limite_valor": None,
+            })
+            metodo = attrs.get("metodo_equipo")
+            equipo = attrs.get("equipo_prueba") or (metodo.equipo_prueba if metodo else None)
+            if metodo and equipo and metodo.equipo_prueba_id != equipo.id:
+                raise serializers.ValidationError({"metodo_equipo": "El método no pertenece al equipo seleccionado."})
+            attrs["equipo_prueba"] = equipo
+            attrs["metodo_equipo"] = metodo
+            condicion = attrs.get("condicion") or getattr(prueba, "condicion_catalogo", None)
+            attrs["condicion"] = condicion
+            attrs["condicion_texto"] = attrs.get("condicion_texto") or format_condition_label(condicion) or getattr(prueba, "condicion", None) or None
+            attrs["unidad"] = attrs.get("unidad") or getattr(prueba, "unidad_medida", None) or None
+            return attrs
+        fuente_limite = attrs.get("fuente_limite")
+        if fuente_limite and fuente_limite.prueba_id != prueba.id:
+            raise serializers.ValidationError({"fuente_limite": "La versión de límites no pertenece a la prueba seleccionada."})
+        if fuente_limite and not fuente_limite.publicada:
+            raise serializers.ValidationError({"fuente_limite": "La versión de límites seleccionada está desactivada para nuevas asignaciones."})
+        if not fuente_limite:
+            fuente_limite = PruebaFuenteLimite.objects.filter(
+                prueba=prueba,
+                activo=True,
+                deleted_at__isnull=True,
+            ).order_by("-version", "-id").first()
+            attrs["fuente_limite"] = fuente_limite
         metodo = attrs.get("metodo_equipo")
         equipo = attrs.get("equipo_prueba") or (metodo.equipo_prueba if metodo else None)
         condicion = attrs.get("condicion") or getattr(prueba, "condicion_catalogo", None)
@@ -379,13 +458,13 @@ class BatchAssignPruebaItemSerializer(serializers.Serializer):
         attrs["metodo_equipo"] = metodo
         attrs["condicion"] = condicion
         attrs["condicion_texto"] = attrs.get("condicion_texto") or format_condition_label(condicion) or getattr(prueba, "condicion", None) or None
-        has_catalog_source = _has_catalog_limit_source(prueba)
+        has_catalog_source = bool(fuente_limite) and fuente_limite.tipo_limite in ["catalogo", "campo_muestra", "seleccion_asignacion"]
         if not has_catalog_source:
             _discard_obsolete_catalog_selection(attrs)
         criterio_evaluacion = attrs.get("criterio_evaluacion")
         if criterio_evaluacion:
             fuente = criterio_evaluacion.fuente_limite
-            if fuente.prueba_id != prueba.id:
+            if fuente.prueba_id != prueba.id or (fuente_limite and fuente.pk != fuente_limite.pk):
                 raise serializers.ValidationError({"criterio_evaluacion": "El criterio no pertenece a la prueba seleccionada."})
             if criterio_evaluacion.catalogo_item_id:
                 attrs["criterio_limite_item"] = criterio_evaluacion.catalogo_item
@@ -402,7 +481,7 @@ class BatchAssignPruebaItemSerializer(serializers.Serializer):
             criterio_catalogo = criterio_item.catalogo
             attrs["criterio_limite_catalogo"] = criterio_catalogo
         if criterio_catalogo and not PruebaFuenteLimite.objects.filter(
-            prueba=prueba,
+            pk=getattr(fuente_limite, "pk", None),
             catalogo_fuente=criterio_catalogo,
             tipo_limite__in=["catalogo", "campo_muestra", "seleccion_asignacion"],
             activo=True,
@@ -418,11 +497,11 @@ class BatchAssignPruebaItemSerializer(serializers.Serializer):
         if criterio_escala_item and not criterio_escala:
             criterio_escala = criterio_escala_item.escala
             attrs["criterio_limite_escala"] = criterio_escala
-        if criterio_escala and not _scale_limit_exists(prueba, criterio_escala) and criterio_catalogo:
+        if criterio_escala and not _scale_limit_exists(prueba, criterio_escala, fuente_limite) and criterio_catalogo:
             criterio_escala = None
             attrs["criterio_limite_escala"] = None
             attrs["criterio_limite_escala_item"] = None
-        if criterio_escala and not _scale_limit_exists(prueba, criterio_escala):
+        if criterio_escala and not _scale_limit_exists(prueba, criterio_escala, fuente_limite):
             raise serializers.ValidationError({
                 "criterio_limite_escala": "La escala seleccionada no es una fuente de limite global ordinal para esta prueba."
             })
@@ -432,6 +511,7 @@ class BatchAssignPruebaItemSerializer(serializers.Serializer):
             prueba,
             attrs.get("criterio_limite_valor"),
             bool(attrs.get("criterio_limite_escala_item")),
+            fuente_limite,
         )
         if missing_fields:
             raise serializers.ValidationError({
@@ -479,17 +559,25 @@ class BatchAssignPruebasSerializer(serializers.Serializer):
         return unique
 
 
-def _scale_limit_exists(prueba, escala):
+def _scale_limit_exists(prueba, escala, fuente_limite=None):
     if not prueba or not escala:
         return False
+    filters = {
+        "tipo_comparacion__in": ["escala", "escala_ordinal"],
+        "escala_comparacion": escala,
+        "activo": True,
+        "deleted_at__isnull": True,
+    }
+    if fuente_limite:
+        filters["fuente_limite"] = fuente_limite
+    else:
+        filters.update({
+            "fuente_limite__prueba": prueba,
+            "fuente_limite__activo": True,
+            "fuente_limite__deleted_at__isnull": True,
+        })
     return PruebaLimiteCampo.objects.filter(
-        fuente_limite__prueba=prueba,
-        fuente_limite__activo=True,
-        fuente_limite__deleted_at__isnull=True,
-        tipo_comparacion__in=["escala", "escala_ordinal"],
-        escala_comparacion=escala,
-        activo=True,
-        deleted_at__isnull=True,
+        **filters,
     ).exists()
 
 
@@ -560,14 +648,20 @@ def _field_origin(field):
     return "asignacion" if getattr(source, "tipo_limite", None) == "global" else "catalogo"
 
 
-def _missing_manual_limit_fields(prueba, value, has_scale_item=False):
-    fields = list(PruebaLimiteCampo.objects.filter(
-        fuente_limite__prueba=prueba,
-        fuente_limite__activo=True,
-        fuente_limite__deleted_at__isnull=True,
-        activo=True,
-        deleted_at__isnull=True,
-    ).exclude(
+def _missing_manual_limit_fields(prueba, value, has_scale_item=False, fuente_limite=None):
+    filters = {
+        "activo": True,
+        "deleted_at__isnull": True,
+    }
+    if fuente_limite:
+        filters["fuente_limite"] = fuente_limite
+    else:
+        filters.update({
+            "fuente_limite__prueba": prueba,
+            "fuente_limite__activo": True,
+            "fuente_limite__deleted_at__isnull": True,
+        })
+    fields = list(PruebaLimiteCampo.objects.filter(**filters).exclude(
         operador="informativo",
     ).select_related("fuente_limite").prefetch_related("fuente_limite__criterios").order_by("orden", "id"))
 

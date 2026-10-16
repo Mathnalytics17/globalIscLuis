@@ -50,7 +50,10 @@ urlpatterns = [
     path("technical-config/comparison-scale-items/<int:pk>/restore/", EscalaComparacionItemViewSet.as_view({"post": "restore"})),
 
     path("technical-config/limit-sources/", PruebaFuenteLimiteViewSet.as_view({"get": "list", "post": "create"})),
+    path("technical-config/limit-sources/versions/", PruebaFuenteLimiteViewSet.as_view({"get": "versions"})),
     path("technical-config/limit-sources/resolve-preview/", PruebaFuenteLimiteViewSet.as_view({"post": "resolve_preview"})),
+    path("technical-config/limit-sources/<int:pk>/activate/", PruebaFuenteLimiteViewSet.as_view({"post": "activate"})),
+    path("technical-config/limit-sources/<int:pk>/deactivate/", PruebaFuenteLimiteViewSet.as_view({"post": "deactivate"})),
     path("technical-config/limit-sources/<int:pk>/generate-fields/", PruebaFuenteLimiteViewSet.as_view({"post": "generate_fields"})),
     path("technical-config/limit-sources/<int:pk>/matrix-template/", PruebaFuenteLimiteViewSet.as_view({"get": "matrix_template"})),
     path("technical-config/limit-sources/<int:pk>/import-matrix/", PruebaFuenteLimiteViewSet.as_view({"post": "import_matrix"})),

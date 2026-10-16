@@ -33,6 +33,7 @@ from apps.users.api.services import (
     user_has_permission,
     is_role_assignable_by,
 )
+from apps.users.api.session_security import revoke_user_sessions
 
 
 class GlobalOrPermissionMixin:
@@ -387,6 +388,7 @@ class UserSecurityViewSet(GlobalOrPermissionMixin, viewsets.GenericViewSet):
         target.block_reason = reason
         target.block_scope = scope
         target.save(update_fields=["is_active", "access_status", "blocked_at", "blocked_by", "block_reason", "block_scope"])
+        revoke_user_sessions(target)
         profiles = UserCompanyProfile.objects.filter(user=target)
         if not self._is_global():
             profiles = profiles.filter(empresa=request.user.empresa)
@@ -461,6 +463,7 @@ class UserSecurityViewSet(GlobalOrPermissionMixin, viewsets.GenericViewSet):
         target.blocked_by = request.user
         target.blocked_at = timezone.now()
         target.save(update_fields=["is_active", "is_read_only", "access_status", "block_reason", "blocked_by", "blocked_at"])
+        revoke_user_sessions(target)
         profiles = UserCompanyProfile.objects.filter(user=target)
         if not self._is_global():
             profiles = profiles.filter(empresa=request.user.empresa)

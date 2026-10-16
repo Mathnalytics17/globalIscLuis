@@ -373,6 +373,7 @@ class PruebaFuenteLimiteSerializer(serializers.ModelSerializer):
     campos_limite = PruebaLimiteCampoSerializer(many=True, read_only=True)
     criterios = CriterioEvaluacionLimiteSerializer(many=True, read_only=True)
     catalogos_configurados = serializers.SerializerMethodField()
+    asignaciones_count = serializers.SerializerMethodField()
 
     class Meta:
         model = PruebaFuenteLimite
@@ -408,6 +409,9 @@ class PruebaFuenteLimiteSerializer(serializers.ModelSerializer):
                 "catalogo", "campo_tecnico_muestra"
             ).filter(activo=True)
         ]
+
+    def get_asignaciones_count(self, obj):
+        return getattr(obj, "asignaciones_count", None) or obj.pruebas_muestra_versionadas.count()
 
     def validate(self, attrs):
         instance = self.instance or PruebaFuenteLimite()

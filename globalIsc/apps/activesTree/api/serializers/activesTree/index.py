@@ -47,6 +47,7 @@ class RecursiveFolderSerializer(serializers.ModelSerializer):
                 'frecuenciaCambio': obj.machine.frecuenciaCambio,
                 'frecuenciaAnalisis': obj.machine.frecuenciaAnalisis,
                 'descripcion': obj.machine.descripcion,
+                'empresa': obj.machine.empresa_id,
             }
         return None
     
@@ -73,6 +74,14 @@ class RecursiveFolderSerializer(serializers.ModelSerializer):
                 'codigo': point.codigo,
                 'descripcion': point.descripcion,
                 'lubricante': point.lubricante,
+                'lubricante_catalogo': point.lubricante_catalogo_id,
+                'lubricante_catalogo_info': (
+                    {
+                        'id': point.lubricante_catalogo_id,
+                        'fabricante': point.lubricante_catalogo.fabricante,
+                        'referencia': point.lubricante_catalogo.referencia,
+                    } if point.lubricante_catalogo_id else None
+                ),
                 'frecuencia_cambio': point.frecuencia_cambio,
                 'unidad_frecuencia_cambio': point.unidad_frecuencia_cambio,
                 'frecuencia_analisis': point.frecuencia_analisis,
