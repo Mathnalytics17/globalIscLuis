@@ -37,8 +37,10 @@ from apps.reporte.api.serializers.index import (
     ReporteSummarySerializer,
 )
 from apps.resultado.api.views.index import _sample_tests_for_lote
+from apps.resultado.api.models.index import VersionInterpretacion
 from apps.users.api.models.index import User
 from apps.users.api.services import audit_user_action
+from apps.muestras.services.operational_audit import record_operational_event
 from PIL import Image, UnidentifiedImageError
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,34 @@ def _has_interpretation(muestra):
         or data.get("comentarios_predefinidos")
         or data.get("selected_predefined_comments")
         or data.get("comentarios_manuales")
+    )
+
+
+def _interpretation_version_for_report(muestra, user):
+    """Return the immutable interpretation version used by a report.
+
+    Old samples may have interpretation JSON saved before versioning existed.
+    Their first report receives an explicitly marked legacy version instead of
+    silently losing the source used to generate it.
+    """
+    version = (
+        VersionInterpretacion.objects.filter(muestra=muestra)
+        .order_by("-version")
+        .first()
+    )
+    if version:
+        return version
+
+    interpretation = _interpretation_from_sample(muestra)
+    if not interpretation:
+        return None
+    return VersionInterpretacion.objects.create(
+        muestra=muestra,
+        version=1,
+        contenido=interpretation,
+        motivo="Versionado inicial de una interpretación existente.",
+        origen="legado",
+        creado_por=user,
     )
 
 
@@ -493,7 +523,24 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             from rest_framework.exceptions import ValidationError
             raise ValidationError({"lote": "El lote no corresponde a la muestra indicada."})
         now = timezone.now()
-        serializer.save(usuario_emision=self.request.user, fecha_emision=now, fecha_generacion=now)
+        reporte = serializer.save(usuario_emision=self.request.user, fecha_emision=now, fecha_generacion=now)
+        record_operational_event(
+            actor=self.request.user,
+            action="reporte.creado_manual",
+            entity_type="reporte",
+            entity_id=reporte.id,
+            entity_label=f"{reporte.consecutivo} v{reporte.version}",
+            lote=reporte.lote,
+            muestra=reporte.muestra,
+            reporte=reporte,
+            detail="Reporte creado mediante el endpoint directo.",
+            after={
+                "consecutivo": reporte.consecutivo,
+                "version": reporte.version,
+                "estatus": reporte.estatus,
+                "with_limites": reporte.with_limites,
+            },
+        )
 
     def update(self, request, *args, **kwargs):
         return Response(
@@ -523,10 +570,25 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         reason = str(request.data.get("reason") or "").strip()
         if not reason:
             return Response({"reason": ["Indique el motivo de anulación."]}, status=status.HTTP_400_BAD_REQUEST)
+        previous_status = reporte.estatus
         reporte.estatus = "anulado"
         reporte.notas_internas = "\n".join(filter(None, [reporte.notas_internas, f"[Anulación] {reason}"]))
         reporte.save(update_fields=["estatus", "notas_internas"])
         audit_user_action(request, "report.annulled", metadata={"report_id": reporte.pk})
+        record_operational_event(
+            actor=request.user,
+            action="reporte.anulado",
+            entity_type="reporte",
+            entity_id=reporte.id,
+            entity_label=f"{reporte.consecutivo} v{reporte.version}",
+            lote=reporte.lote,
+            muestra=reporte.muestra,
+            reporte=reporte,
+            detail="Reporte anulado.",
+            reason=reason,
+            before={"estatus": previous_status},
+            after={"estatus": "anulado"},
+        )
         return Response({"detail": "Reporte anulado."})
 
     def _build_snapshot(self, muestra, request_user):
@@ -610,8 +672,15 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     def _create_from_interpretation(self, muestra, request):
         version = self._next_version(muestra.id)
+        interpretation_version = _interpretation_version_for_report(muestra, request.user)
         snapshot = self._build_snapshot(muestra, request.user)
         snapshot["version"] = version
+        if interpretation_version:
+            snapshot["interpretacion_version"] = {
+                "id": interpretation_version.id,
+                "version": interpretation_version.version,
+                "origen": interpretation_version.origen,
+            }
         snapshot = _json_safe(snapshot)
         comments = snapshot.get("comentarios", {})
 
@@ -629,6 +698,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             lote=muestra.lote,
             version=version,
             snapshot=snapshot,
+            interpretacion_version=interpretation_version,
             fecha_emision=timezone.now(),
             fecha_generacion=timezone.now(),
             usuario_emision=request.user,
@@ -659,6 +729,22 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         reporte = self._create_from_interpretation(muestra, request)
         _mark_lote_reported_if_ready(muestra.lote)
         audit_user_action(request, "report.generated", metadata={"report_id": reporte.pk, "sample_id": muestra.pk})
+        record_operational_event(
+            actor=request.user,
+            action="reporte.generado",
+            entity_type="reporte",
+            entity_id=reporte.id,
+            entity_label=f"{reporte.consecutivo} v{reporte.version}",
+            lote=reporte.lote,
+            muestra=muestra,
+            reporte=reporte,
+            detail="Reporte generado desde interpretación.",
+            metadata={
+                "version": reporte.version,
+                "interpretacion_version": reporte.interpretacion_version_id,
+            },
+            after={"estatus": reporte.estatus, "version": reporte.version},
+        )
         return Response(ReporteSerializer(reporte, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["post"], url_path="generate-batch-from-interpretation")
@@ -685,6 +771,17 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             reports = [self._create_from_interpretation(sample, request) for sample in samples]
             _mark_lote_reported_if_ready(lote)
         audit_user_action(request, "report.batch_generated", metadata={"batch_id": lote.pk, "report_count": len(reports)})
+        record_operational_event(
+            actor=request.user,
+            action="lote.reportes_generados",
+            entity_type="lote",
+            entity_id=lote.id,
+            entity_label=lote.id,
+            lote=lote,
+            detail="Reportes individuales generados desde las interpretaciones del lote.",
+            metadata={"reportes_generados": len(reports), "reportes": [report.id for report in reports]},
+            after={"estado": lote.estado},
+        )
         return Response({
             "detail": f"Se generaron {len(reports)} reportes individuales para el lote {lote.id}.",
             "generated": len(reports),
@@ -781,13 +878,40 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         reporte.visible_cliente = True
         reporte.save(update_fields=["visible_cliente"])
         ReporteEnvio.objects.create(reporte=reporte, canal="app", enviado_por=request.user, estado="enviado")
+        record_operational_event(
+            actor=request.user,
+            action="reporte.publicado_cliente",
+            entity_type="reporte",
+            entity_id=reporte.id,
+            entity_label=f"{reporte.consecutivo} v{reporte.version}",
+            lote=reporte.lote,
+            muestra=reporte.muestra,
+            reporte=reporte,
+            detail="Reporte publicado para consulta del cliente.",
+            before={"visible_cliente": False},
+            after={"visible_cliente": True},
+        )
         return Response(ReporteSerializer(reporte, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="unpublish-client")
     def unpublish_client(self, request, pk=None):
         reporte = self.get_object()
+        was_visible = reporte.visible_cliente
         reporte.visible_cliente = False
         reporte.save(update_fields=["visible_cliente"])
+        record_operational_event(
+            actor=request.user,
+            action="reporte.ocultado_cliente",
+            entity_type="reporte",
+            entity_id=reporte.id,
+            entity_label=f"{reporte.consecutivo} v{reporte.version}",
+            lote=reporte.lote,
+            muestra=reporte.muestra,
+            reporte=reporte,
+            detail="Reporte retirado de la consulta del cliente.",
+            before={"visible_cliente": was_visible},
+            after={"visible_cliente": False},
+        )
         return Response(ReporteSerializer(reporte, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="send-email")
@@ -866,7 +990,33 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             )
 
         if estado == "fallido":
+            record_operational_event(
+                actor=request.user,
+                action="reporte.envio_fallido",
+                entity_type="reporte",
+                entity_id=reporte.id,
+                entity_label=f"{reporte.consecutivo} v{reporte.version}",
+                lote=reporte.lote,
+                muestra=reporte.muestra,
+                reporte=reporte,
+                detail="No se pudo enviar el reporte por correo.",
+                metadata={"destinatarios": len(recipients)},
+            )
             return Response({"detail": "No se pudo enviar el correo.", "error": error}, status=status.HTTP_502_BAD_GATEWAY)
+
+        record_operational_event(
+            actor=request.user,
+            action="reporte.enviado_correo",
+            entity_type="reporte",
+            entity_id=reporte.id,
+            entity_label=f"{reporte.consecutivo} v{reporte.version}",
+            lote=reporte.lote,
+            muestra=reporte.muestra,
+            reporte=reporte,
+            detail="Reporte enviado por correo.",
+            metadata={"destinatarios": len(recipients)},
+            after={"estatus": reporte.estatus, "visible_cliente": reporte.visible_cliente},
+        )
 
         return Response({
             "detail": "Reporte enviado.",
@@ -1007,6 +1157,16 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                         reporte=report, canal="email", destinatario_email=recipient,
                         enviado_por=request.user, estado="fallido", error=str(exc),
                     )
+            record_operational_event(
+                actor=request.user,
+                action="lote.envio_reportes_fallido",
+                entity_type="lote",
+                entity_id=lote.id,
+                entity_label=lote.id,
+                lote=lote,
+                detail="No se pudo enviar por correo el paquete de reportes del lote.",
+                metadata={"reportes": len(reports), "destinatarios": len(recipients)},
+            )
             return Response({"detail": "No se pudo enviar el lote."}, status=status.HTTP_502_BAD_GATEWAY)
 
         now = timezone.now()
@@ -1021,6 +1181,17 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                     reporte=report, canal="email", destinatario_email=recipient,
                     enviado_por=request.user, estado="enviado",
                 )
+        record_operational_event(
+            actor=request.user,
+            action="lote.reportes_enviados_correo",
+            entity_type="lote",
+            entity_id=lote.id,
+            entity_label=lote.id,
+            lote=lote,
+            detail="Paquete de reportes del lote enviado por correo.",
+            metadata={"reportes": len(reports), "destinatarios": len(recipients), "formato": file_format},
+            after={"estado": lote.estado},
+        )
         return Response({
             "detail": "Lote de reportes enviado.",
             "lote": lote.id,
@@ -1043,18 +1214,46 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def aprobar(self, request, pk=None):
         reporte = self.get_object()
+        previous_status = reporte.estatus
         reporte.usuario_aprobacion = request.user
         reporte.fecha_aprobacion = timezone.now()
         reporte.estatus = "aprobado"
         reporte.save(update_fields=["usuario_aprobacion", "fecha_aprobacion", "estatus"])
         audit_user_action(request, "report.approved", metadata={"report_id": reporte.pk})
+        record_operational_event(
+            actor=request.user,
+            action="reporte.aprobado",
+            entity_type="reporte",
+            entity_id=reporte.id,
+            entity_label=f"{reporte.consecutivo} v{reporte.version}",
+            lote=reporte.lote,
+            muestra=reporte.muestra,
+            reporte=reporte,
+            detail="Reporte aprobado.",
+            before={"estatus": previous_status},
+            after={"estatus": "aprobado"},
+        )
         return Response(ReporteSerializer(reporte, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"])
     def enviar_aprobacion(self, request, pk=None):
         reporte = self.get_object()
+        previous_status = reporte.estatus
         reporte.estatus = "pendiente_aprobacion"
         reporte.save(update_fields=["estatus"])
+        record_operational_event(
+            actor=request.user,
+            action="reporte.enviado_aprobacion",
+            entity_type="reporte",
+            entity_id=reporte.id,
+            entity_label=f"{reporte.consecutivo} v{reporte.version}",
+            lote=reporte.lote,
+            muestra=reporte.muestra,
+            reporte=reporte,
+            detail="Reporte enviado a aprobación interna.",
+            before={"estatus": previous_status},
+            after={"estatus": "pendiente_aprobacion"},
+        )
         return Response(ReporteSerializer(reporte, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["get"])

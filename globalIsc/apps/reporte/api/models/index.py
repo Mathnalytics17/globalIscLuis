@@ -27,6 +27,13 @@ class Reporte(models.Model):
     )
     version = models.PositiveIntegerField(default=1)
     snapshot = models.JSONField(blank=True, null=True)
+    interpretacion_version = models.ForeignKey(
+        "resultado.VersionInterpretacion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reportes_generados",
+    )
 
     fecha_emision = models.DateTimeField()
     fecha_generacion = models.DateTimeField(blank=True, null=True)

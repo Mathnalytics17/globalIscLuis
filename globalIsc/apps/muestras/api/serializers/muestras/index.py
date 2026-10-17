@@ -11,6 +11,8 @@ from apps.muestras.api.serializers.muestraAtributoTecnico.index import (
     validate_required_sample_attributes,
 )
 from apps.muestras.api.serializers.pruebasMuestra.index import PruebaMuestraSerializer
+from apps.muestras.services.operational_audit import record_operational_event
+from apps.activesTree.api.models.index import AsignacionPuntoMuestreo
 
 
 class CreateMuestraSerializer(serializers.ModelSerializer):
@@ -50,12 +52,44 @@ class CreateMuestraSerializer(serializers.ModelSerializer):
             validated_data["usuario_registro"] = request.user
         muestra = super().create(validated_data)
         replace_sample_attributes(muestra, atributos_data)
+        request = self.context.get("request")
+        record_operational_event(
+            actor=request.user if request and request.user.is_authenticated else None,
+            action="muestra.creada",
+            entity_type="muestra",
+            entity_id=muestra.id,
+            entity_label=muestra.id,
+            muestra=muestra,
+            detail="Muestra creada.",
+            after=build_sample_snapshot(muestra),
+        )
         return muestra
 
     @transaction.atomic
     def update(self, instance, validated_data):
         estado_anterior = build_sample_snapshot(instance)
         atributos_data = validated_data.pop("atributos_tecnicos", None)
+
+        # A sampling point is part of a machine's technical context.  Leaving an
+        # active assignment behind when the machine changes corrupts both the
+        # current view and the trend history, so close it before saving the new
+        # machine.  The assignment is retained as history; it is never deleted.
+        machine_changed = (
+            "referencia_equipo" in validated_data
+            and getattr(validated_data["referencia_equipo"], "id", None) != instance.referencia_equipo_id
+        )
+        previous_point = None
+        if machine_changed:
+            active_assignment = (
+                AsignacionPuntoMuestreo.objects.select_for_update()
+                .filter(muestra=instance, activa=True)
+                .select_related("punto_muestreo")
+                .first()
+            )
+            if active_assignment:
+                previous_point = active_assignment.punto_muestreo
+                active_assignment.close()
+
         muestra = super().update(instance, validated_data)
         if atributos_data is not None:
             replace_sample_attributes(muestra, atributos_data)
@@ -71,6 +105,33 @@ class CreateMuestraSerializer(serializers.ModelSerializer):
                 estado_anterior=estado_anterior,
                 estado_nuevo=estado_nuevo,
             )
+            request = self.context.get("request")
+            record_operational_event(
+                actor=request.user if request and request.user.is_authenticated else None,
+                action="muestra.actualizada",
+                entity_type="muestra",
+                entity_id=muestra.id,
+                entity_label=muestra.id,
+                muestra=muestra,
+                detail="Información de muestra actualizada.",
+                before=estado_anterior,
+                after=estado_nuevo,
+                metadata={"campos_modificados": sorted(cambios)},
+            )
+        if previous_point:
+            request = self.context.get("request")
+            record_operational_event(
+                actor=request.user if request and request.user.is_authenticated else None,
+                action="muestra.punto_muestreo_desasignado",
+                entity_type="muestra",
+                entity_id=muestra.id,
+                entity_label=muestra.id,
+                muestra=muestra,
+                maquina=muestra.referencia_equipo,
+                detail="Punto de medida retirado al cambiar el equipo de la muestra.",
+                before={"punto_muestreo": {"id": previous_point.id, "nombre": previous_point.nombre}},
+                after={"punto_muestreo": None},
+            )
         return muestra
 
 
@@ -80,7 +141,6 @@ def build_sample_snapshot(muestra):
         "fecha_toma",
         "contacto_cliente",
         "equipo_placa",
-        "referencia_equipo_id",
         "periodo_servicio_aceite",
         "unidad_periodo_aceite",
         "periodo_servicio_equipo",
@@ -95,6 +155,22 @@ def build_sample_snapshot(muestra):
     for field in scalar_fields:
         value = getattr(muestra, field, None)
         snapshot[field] = value.isoformat() if hasattr(value, "isoformat") else value
+    equipo = muestra.referencia_equipo
+    snapshot["referencia_equipo_id"] = (
+        {
+            "id": equipo.id,
+            "nombre": equipo.nombre,
+            "codigo": equipo.codigo_equipo,
+        }
+        if equipo
+        else None
+    )
+    current_assignment = muestra.asignaciones_punto_muestreo.filter(activa=True).select_related("punto_muestreo").first()
+    snapshot["punto_muestreo"] = (
+        {"id": current_assignment.punto_muestreo_id, "nombre": current_assignment.punto_muestreo.nombre}
+        if current_assignment
+        else None
+    )
     snapshot["atributos_tecnicos"] = [
         {
             "campo_tecnico": attribute.campo_tecnico_id,

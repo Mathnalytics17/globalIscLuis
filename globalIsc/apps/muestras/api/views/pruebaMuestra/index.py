@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
+from apps.muestras.services.operational_audit import record_operational_event
 
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
@@ -76,16 +77,56 @@ class PruebaMuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             return CreatePruebaMuestraSerializer
         return PruebaMuestraSerializer
 
+    @staticmethod
+    def _audit_snapshot(assignment):
+        """Payload breve y estable para reconstruir cambios de una asignación."""
+        return {
+            "prueba": assignment.prueba.acronimo,
+            "estado_asignacion": assignment.estado_asignacion,
+            "aplicar_limites": assignment.aplicar_limites,
+            "fuente_limite": assignment.fuente_limite_id,
+            "criterio_evaluacion": assignment.criterio_evaluacion_id,
+            "unidad": assignment.unidad_configurada,
+            "condicion": assignment.condicion_configurada,
+            "estatus": assignment.estatus,
+        }
+
     def perform_create(self, serializer):
         if serializer.validated_data["muestra"].estado_operativo != "activa":
             raise ValidationError({"muestra": "No se pueden asignar pruebas a una muestra invalidada."})
-        serializer.save(usuario_solicitud=self.request.user)
+        assignment = serializer.save(usuario_solicitud=self.request.user)
+        record_operational_event(
+            actor=self.request.user,
+            action="prueba_muestra.asignada",
+            entity_type="prueba_muestra",
+            entity_id=assignment.id,
+            entity_label=str(assignment),
+            muestra=assignment.muestra,
+            prueba_muestra=assignment,
+            detail="Prueba asignada a la muestra.",
+            after=self._audit_snapshot(assignment),
+        )
 
     def perform_update(self, serializer):
         muestra = serializer.validated_data.get("muestra", serializer.instance.muestra)
         if muestra.estado_operativo != "activa":
             raise ValidationError({"muestra": "No se puede modificar una prueba de una muestra invalidada."})
-        serializer.save()
+        before = self._audit_snapshot(serializer.instance)
+        assignment = serializer.save()
+        after = self._audit_snapshot(assignment)
+        if before != after:
+            record_operational_event(
+                actor=self.request.user,
+                action="prueba_muestra.actualizada",
+                entity_type="prueba_muestra",
+                entity_id=assignment.id,
+                entity_label=str(assignment),
+                muestra=assignment.muestra,
+                prueba_muestra=assignment,
+                detail="Configuración de prueba actualizada.",
+                before=before,
+                after=after,
+            )
 
     def destroy(self, request, *args, **kwargs):
         assignment = self.get_object()
@@ -94,6 +135,17 @@ class PruebaMuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 {"detail": "Esta prueba ya tiene mediciones. Corrija o invalide el resultado; no puede desasignarse."},
                 status=status.HTTP_409_CONFLICT,
             )
+        snapshot = self._audit_snapshot(assignment)
+        record_operational_event(
+            actor=request.user,
+            action="prueba_muestra.retirada",
+            entity_type="prueba_muestra",
+            entity_id=assignment.id,
+            entity_label=str(assignment),
+            muestra=assignment.muestra,
+            detail="Prueba retirada de la muestra antes de registrar mediciones.",
+            before=snapshot,
+        )
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'], url_path='by-sample/(?P<muestra_id>[^/.]+)')
@@ -143,6 +195,26 @@ class PruebaMuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             estado_asignacion=estado_asignacion,
             lote_predefinido=lote_predefinido,
             user=request.user,
+        )
+        record_operational_event(
+            actor=request.user,
+            action="lote.pruebas_sincronizadas",
+            entity_type="lote",
+            entity_id=lote.id,
+            entity_label=lote.id,
+            lote=lote,
+            detail="Asignación de pruebas sincronizada.",
+            metadata={
+                "muestras": [muestra.id for muestra in muestras],
+                "pruebas_solicitadas": len(pruebas),
+                "creadas": sync_result.created,
+                "actualizadas": sync_result.updated,
+                "sin_cambios": sync_result.unchanged,
+                "retiradas": sync_result.deleted,
+                "protegidas": len(sync_result.protected),
+                "estado_asignacion": estado_asignacion,
+                "aplicar_limites": data.get("aplicar_limites", True),
+            },
         )
 
         response_serializer = PruebaMuestraAssignmentSerializer(

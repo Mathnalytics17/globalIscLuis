@@ -14,6 +14,26 @@ from apps.muestras.api.serializers.muestraAtributoTecnico.index import (
     replace_sample_attributes,
 )
 from apps.muestras.api.services.workflow import capabilities_for_batch
+from apps.muestras.services.operational_audit import record_operational_event
+
+
+def _record_sample_created_from_lot(muestra, actor):
+    record_operational_event(
+        actor=actor,
+        action="muestra.creada",
+        entity_type="muestra",
+        entity_id=muestra.id,
+        entity_label=muestra.id,
+        muestra=muestra,
+        detail="Muestra creada dentro del lote.",
+        after={
+            "tipo_muestra": muestra.tipo_muestra,
+            "condicion": muestra.condicion,
+            "fecha_toma": muestra.fecha_toma.isoformat() if muestra.fecha_toma else None,
+            "referencia_equipo": muestra.referencia_equipo_id,
+            "referencia_marca": muestra.referencia_marca or "",
+        },
+    )
 
 class MuestraLoteCreateSerializer(serializers.ModelSerializer):
     atributos_tecnicos = MuestraAtributoTecnicoSerializer(many=True, required=False)
@@ -370,6 +390,7 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
                 AsignacionPuntoMuestreo.objects.create(
                     muestra=muestra, punto_muestreo=punto_muestreo, origen='lote', asignado_por=lote.usuario_registro,
                 )
+            _record_sample_created_from_lot(muestra, lote.usuario_registro)
 
         lote.recalcular_estado()
 
@@ -444,6 +465,11 @@ class AddMuestrasToLoteSerializer(serializers.Serializer):
                     muestra=muestra, punto_muestreo=punto_muestreo, origen='lote',
                     asignado_por=request.user if request and request.user.is_authenticated else lote.usuario_registro,
                 )
+
+            _record_sample_created_from_lot(
+                muestra,
+                request.user if request and request.user.is_authenticated else lote.usuario_registro,
+            )
 
             created_muestras.append(muestra)
 

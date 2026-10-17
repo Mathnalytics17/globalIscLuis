@@ -4,3 +4,5 @@ from apps.muestras.api.models.muestras.index import Muestra
 from apps.muestras.api.models.muestraAtributoTecnico.index import MuestraAtributoTecnico
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
 from apps.muestras.api.models.sampleBatchExcel.index import SampleBatchExcelTemplateToken
+from apps.muestras.api.models.auditoria import EventoAuditoriaOperativa
+from apps.muestras.api.models.importaciones import CorridaImportacion

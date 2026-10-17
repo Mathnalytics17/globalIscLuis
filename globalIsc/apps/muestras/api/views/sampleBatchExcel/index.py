@@ -1,5 +1,6 @@
 import re
 import uuid
+import hashlib
 from datetime import timedelta
 from io import BytesIO
 
@@ -19,6 +20,8 @@ from apps.activesTree.api.models.machines.index import Maquina
 from apps.activesTree.api.models.index import PuntoMuestreo
 from apps.misc.api.models.dynamicTechnicalConfig.index import CampoTecnicoMuestra
 from apps.muestras.api.models.sampleBatchExcel.index import SampleBatchExcelTemplateToken
+from apps.muestras.api.models.importaciones import CorridaImportacion
+from apps.muestras.services.operational_audit import record_operational_event
 from apps.users.api.models.index import User
 
 SCHEMA_VERSION = "sample-batch-v5-sampling-points"
@@ -389,6 +392,9 @@ class SampleBatchExcelImportViewSet(ActionPermissionMixin, viewsets.ViewSet):
         file_error = validate_uploaded_workbook_file(uploaded)
         if file_error:
             return Response({"detail": file_error}, status=status.HTTP_400_BAD_REQUEST)
+        uploaded.seek(0)
+        raw_content = uploaded.read()
+        uploaded.seek(0)
         try:
             workbook = load_workbook(uploaded, data_only=True)
             schema, token_value, template_rows, stored_headers = get_meta(workbook)
@@ -431,13 +437,32 @@ class SampleBatchExcelImportViewSet(ActionPermissionMixin, viewsets.ViewSet):
             if len(rows) >= MAX_IMPORT_ROWS:
                 break
 
+        valid_rows = sum(1 for row in rows if row["is_valid"])
+        error_rows = sum(1 for row in rows if not row["is_valid"])
+        total_errors = sum(len(row["errors"]) for row in rows)
+        run = CorridaImportacion.objects.create(
+            empresa_id=token.cliente_empresa_id,
+            actor=request.user,
+            tipo="lote_muestras_excel",
+            estado=CorridaImportacion.Estado.VALIDADA if not error_rows and not truncated else CorridaImportacion.Estado.FALLIDA,
+            archivo_nombre=uploaded.name,
+            checksum=hashlib.sha256(raw_content).hexdigest(),
+            total_filas=len(rows),
+            creadas=0,
+            omitidas=error_rows,
+            errores=total_errors,
+            detalle_errores=[{"hoja": row["sheet"], "fila": row["row_number"], "errores": row["errors"]} for row in rows if row["errors"]][:200],
+            metadata={"schema_version": SCHEMA_VERSION, "template_token": str(token.token), "truncated": truncated, "valid_rows": valid_rows},
+        )
+        record_operational_event(actor=request.user, empresa=token.cliente_empresa, action="importacion.previsualizada", entity_type="importacion", entity_id=run.id, entity_label=uploaded.name, detail="Archivo Excel validado para importación.", after={"total_filas": len(rows), "validas": valid_rows, "errores": total_errors, "estado": run.estado}, origin="importacion")
         return Response({
+            "import_run_id": run.id,
             "template_token": str(token.token),
             "schema_version": SCHEMA_VERSION,
             "total_rows": len(rows),
-            "valid_rows": sum(1 for row in rows if row["is_valid"]),
-            "error_rows": sum(1 for row in rows if not row["is_valid"]),
-            "total_errors": sum(len(row["errors"]) for row in rows),
+            "valid_rows": valid_rows,
+            "error_rows": error_rows,
+            "total_errors": total_errors,
             "template_rows": template_rows,
             "max_import_rows": MAX_IMPORT_ROWS,
             "truncated": truncated,

@@ -22,6 +22,11 @@ urlpatterns = [
         name="samples-history",
     ),
     path(
+        "lubrication/samples/<str:pk>/measurement-point/",
+        MuestraViewSet.as_view({"put": "measurement_point"}),
+        name="samples-measurement-point",
+    ),
+    path(
         "lubrication/samples/<str:pk>/invalidate/",
         MuestraViewSet.as_view({"post": "invalidate"}),
         name="samples-invalidate",
