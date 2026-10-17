@@ -79,6 +79,35 @@ class SamplingPointApiTests(APITestCase):
         self.assertIsNotNone(old.finalizado_en)
         self.assertTrue(current.activa)
 
+    def test_changing_sample_machine_closes_point_from_previous_machine(self):
+        point = PuntoMuestreo.objects.create(maquina=self.machine, nombre='Punto de la máquina A')
+        AsignacionPuntoMuestreo.objects.create(
+            muestra=self.sample_a, punto_muestreo=point, asignado_por=self.user,
+        )
+
+        response = self.client.patch(
+            f'/api/lubrication/samples/{self.sample_a.id}/',
+            {'referencia_equipo': self.other_machine.id},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        assignment = AsignacionPuntoMuestreo.objects.get(muestra=self.sample_a, punto_muestreo=point)
+        self.assertFalse(assignment.activa)
+        self.assertIsNotNone(assignment.finalizado_en)
+
+    def test_sample_cannot_select_point_from_a_different_machine(self):
+        foreign_point = PuntoMuestreo.objects.create(maquina=self.other_machine, nombre='Punto de la máquina B')
+
+        response = self.client.put(
+            f'/api/lubrication/samples/{self.sample_a.id}/measurement-point/',
+            {'punto_muestreo_id': foreign_point.id},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(AsignacionPuntoMuestreo.objects.filter(muestra=self.sample_a, activa=True).exists())
+
     def test_batch_list_can_be_filtered_from_machine_and_sampling_point(self):
         point = PuntoMuestreo.objects.create(maquina=self.machine, nombre='Puerto filtro')
         AsignacionPuntoMuestreo.objects.create(

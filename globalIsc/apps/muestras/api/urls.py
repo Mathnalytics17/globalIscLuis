@@ -4,6 +4,8 @@ from .views.ingresoLabLote.index import IngresoLabLoteViewSet
 from .views.loteMuestras.index import LoteMuestrasViewSet
 from .views.pruebaMuestra.index import PruebaMuestraViewSet
 from .views.sampleBatchExcel.index import SampleBatchExcelImportViewSet
+from .views.trazabilidad.index import TrazabilidadViewSet
+from .views.trazabilidad.importaciones import CorridaImportacionViewSet
 
 
 urlpatterns = [
@@ -20,9 +22,15 @@ urlpatterns = [
     path("lubrication/lab-batch-entries/<int:pk>/", IngresoLabLoteViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="lab-batch-entries-detail"),
     path("lubrication/sample-batches/", LoteMuestrasViewSet.as_view({"get": "list", "post": "create"}), name="sample-batches-list"),
     path("lubrication/sample-batches/resumen/", LoteMuestrasViewSet.as_view({"get": "resumen"}), name="sample-batches-resumen"),
+    path("lubrication/traceability/", TrazabilidadViewSet.as_view({"get": "list"}), name="traceability-list"),
+    path("lubrication/traceability/summary/", TrazabilidadViewSet.as_view({"get": "summary"}), name="traceability-summary"),
+    path("lubrication/traceability/filters/", TrazabilidadViewSet.as_view({"get": "filters"}), name="traceability-filters"),
+    path("lubrication/import-runs/", CorridaImportacionViewSet.as_view({"get": "list"}), name="import-runs-list"),
+    path("lubrication/import-runs/<int:pk>/", CorridaImportacionViewSet.as_view({"get": "retrieve"}), name="import-runs-detail"),
     path("lubrication/sample-batches/<str:pk>/recalcular-estado/", LoteMuestrasViewSet.as_view({"post": "recalcular_estado"}), name="sample-batches-recalculate-status"),
     path("lubrication/sample-batches/<str:pk>/samples/", LoteMuestrasViewSet.as_view({"post": "add_samples"}), name="sample-batches-add-samples"),
     path("lubrication/sample-batches/<str:pk>/cancel/", LoteMuestrasViewSet.as_view({"post": "cancel"}), name="sample-batches-cancel"),
     path("lubrication/sample-batches/<str:pk>/reopen/", LoteMuestrasViewSet.as_view({"post": "reopen"}), name="sample-batches-reopen"),
+    path("lubrication/sample-batches/<str:pk>/timeline/", LoteMuestrasViewSet.as_view({"get": "timeline"}), name="sample-batches-timeline"),
     path("lubrication/sample-batches/<str:pk>/", LoteMuestrasViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="sample-batches-detail"),
 ]

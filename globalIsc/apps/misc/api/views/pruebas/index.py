@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from apps.utils.pagination import StandardResultsSetPagination
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
+from apps.muestras.services.operational_audit import record_operational_event
 
 from apps.misc.api.models.pruebas.index import Prueba
 from apps.misc.api.serializers.pruebas.index import (
@@ -68,10 +69,38 @@ class PruebaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
         return PruebaDetailSerializer
 
+    def _audit_snapshot(self, prueba):
+        return PruebaDetailSerializer(prueba, context=self.get_serializer_context()).data
+
+    def _record_event(self, prueba, action, detail, before=None, after=None):
+        record_operational_event(
+            actor=self.request.user,
+            action=action,
+            entity_type="configuracion.prueba",
+            entity_id=prueba.id,
+            entity_label=f"{prueba.acronimo} · {prueba.nombre_variable}",
+            detail=detail,
+            before=before or {},
+            after=after or {},
+        )
+
+    def perform_create(self, serializer):
+        prueba = serializer.save()
+        self._record_event(prueba, "prueba.creada", "Prueba y su estructura técnica creadas.", after=self._audit_snapshot(prueba))
+
+    def perform_update(self, serializer):
+        before = self._audit_snapshot(serializer.instance)
+        prueba = serializer.save()
+        after = self._audit_snapshot(prueba)
+        if before != after:
+            self._record_event(prueba, "prueba.actualizada", "Estructura técnica de la prueba actualizada.", before, after)
+
     def destroy(self, request, *args, **kwargs):
         prueba = self.get_object()
+        before = self._audit_snapshot(prueba)
         prueba.activo = False
         prueba.save(update_fields=["activo"])
+        self._record_event(prueba, "prueba.desactivada", "Prueba desactivada.", before, self._audit_snapshot(prueba))
         return Response(
             {"detail": "Prueba eliminada correctamente."},
             status=status.HTTP_200_OK,
@@ -87,8 +116,10 @@ class PruebaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        before = self._audit_snapshot(prueba)
         prueba.activo = True
         prueba.save(update_fields=["activo"])
+        self._record_event(prueba, "prueba.reactivada", "Prueba reactivada.", before, self._audit_snapshot(prueba))
 
         serializer = PruebaDetailSerializer(prueba, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)

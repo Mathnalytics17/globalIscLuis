@@ -46,10 +46,18 @@ class CatalogoTecnicoItemValorSerializer(serializers.ModelSerializer):
 
 class CatalogoTecnicoVersionSerializer(serializers.ModelSerializer):
     items_count = serializers.IntegerField(read_only=True)
+    # The sequence is assigned atomically by the ViewSet. Requiring clients
+    # to provide it defeats that contract and exposed a validation error in
+    # the "Nueva versión" drawer.
+    numero = serializers.IntegerField(required=False, min_value=1)
 
     class Meta:
         model = CatalogoTecnicoVersion
         fields = "__all__"
+        # DRF's UniqueTogetherValidator makes every member mandatory before
+        # the ViewSet can generate ``numero``. The database uniqueness remains
+        # enforced after that atomic generation.
+        validators = []
 
 
 class CatalogoTecnicoItemSerializer(serializers.ModelSerializer):
@@ -223,6 +231,7 @@ class EscalaComparacionSerializer(serializers.ModelSerializer):
 
 class PruebaLimiteCampoSerializer(serializers.ModelSerializer):
     operador = serializers.CharField()
+    fuente_limite_info = serializers.SerializerMethodField()
     resultado_nombre = serializers.CharField(source="resultado.nombre", read_only=True)
     division_nombre = serializers.CharField(source="division.nombre", read_only=True)
     componente_nombre = serializers.CharField(source="componente.nombre", read_only=True)
@@ -236,6 +245,17 @@ class PruebaLimiteCampoSerializer(serializers.ModelSerializer):
     class Meta:
         model = PruebaLimiteCampo
         fields = "__all__"
+
+    def get_fuente_limite_info(self, obj):
+        fuente = obj.fuente_limite
+        prueba = fuente.prueba
+        return {
+            "id": fuente.id,
+            "version": fuente.version,
+            "prueba_id": prueba.id,
+            "prueba_acronimo": getattr(prueba, "acronimo", None),
+            "prueba_nombre": getattr(prueba, "nombre_variable", None) or getattr(prueba, "nombre", None),
+        }
 
     def get_resultado_info(self, obj):
         if not obj.resultado_id:

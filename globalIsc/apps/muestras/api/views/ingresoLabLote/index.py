@@ -15,6 +15,7 @@ from apps.muestras.api.serializers.ingresoLabLote.index import (
     LoteDisponibleLaboratorioSerializer,
 )
 from apps.users.api.services import audit_user_action
+from apps.muestras.services.operational_audit import record_operational_event
 
 
 def muestras_laboratorio_prefetch(lookup="muestras"):
@@ -77,6 +78,16 @@ class IngresoLabLoteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         ingreso = serializer.save()
+        record_operational_event(
+            actor=request.user,
+            action="lote.recibido_laboratorio",
+            entity_type="lote",
+            entity_id=ingreso.lote_id,
+            entity_label=ingreso.lote_id,
+            lote=ingreso.lote,
+            detail="Lote recibido en laboratorio.",
+            after={"estado": ingreso.lote.estado, "fecha_recepcion": str(ingreso.fecha_recepcion)},
+        )
         response_serializer = IngresoLabLoteSerializer(ingreso, context=self.get_serializer_context())
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
@@ -103,6 +114,18 @@ class IngresoLabLoteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         lote.save(update_fields=["estado", "observaciones", "fecha_actualizacion"])
         ingreso.delete()
         audit_user_action(request, "laboratorio.revertir_ingreso", empresa=lote.cliente_empresa, detail=reason, metadata={"lote_id": lote.id})
+        record_operational_event(
+            actor=request.user,
+            action="lote.ingreso_laboratorio_revertido",
+            entity_type="lote",
+            entity_id=lote.id,
+            entity_label=lote.id,
+            lote=lote,
+            detail="Ingreso a laboratorio revertido.",
+            reason=reason,
+            before={"estado": "en_laboratorio"},
+            after={"estado": "registrado"},
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=["get"], url_path="available-batches")

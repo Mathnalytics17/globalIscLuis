@@ -19,6 +19,7 @@ from rest_framework.exceptions import ValidationError
 from apps.utils.pagination import StandardResultsSetPagination
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
+from apps.muestras.services.operational_audit import record_operational_event
 
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.muestras.index import Muestra
@@ -39,7 +40,7 @@ from apps.misc.api.models.dynamicTechnicalConfig.index import (
 )
 from apps.misc.api.models.technicalCatalogs.index import EquipoPrueba, MetodoEquipo
 from apps.muestras.api.serializers.pruebasMuestra.index import PruebaMuestraSerializer
-from apps.resultado.api.models.index import Resultado, HistoricoResultado, RevisionResultado
+from apps.resultado.api.models.index import Resultado, HistoricoResultado, RevisionResultado, VersionInterpretacion
 from apps.misc.api.models.pruebas.index import (
     PruebaResultado,
     PruebaResultadoDivision,
@@ -50,6 +51,7 @@ from apps.resultado.api.serializers.index import (
     CreateResultadoSerializer,
     HistoricoResultadoSerializer,
     RevisionResultadoSerializer,
+    VersionInterpretacionSerializer,
 )
 
 
@@ -1369,6 +1371,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "complete_batch_review": "revision.aprobar_resultados",
         "interpretation_batch_detail": "interpretacion.ver",
         "interpretation_sample": "interpretacion.ver",
+        "interpretation_versions": "interpretacion.ver",
         "save_interpretation_sample": "interpretacion.guardar",
         "interpretation_trends": "interpretacion.ver_tendencias",
         "invalidate": "resultados.editar",
@@ -1415,7 +1418,47 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         return ResultadoSerializer
 
     def perform_create(self, serializer):
-        serializer.save(usuario_medicion=self.request.user)
+        resultado = serializer.save(usuario_medicion=self.request.user)
+        prueba_muestra = resultado.prueba_muestra
+        record_operational_event(
+            actor=self.request.user,
+            action="resultado.registrado_manual",
+            entity_type="resultado",
+            entity_id=resultado.id,
+            entity_label=f"{prueba_muestra.prueba.acronimo} · {prueba_muestra.muestra_id}",
+            muestra=prueba_muestra.muestra,
+            prueba_muestra=prueba_muestra,
+            detail="Resultado registrado mediante el endpoint directo.",
+            after={"resultado": _safe_json_loads(resultado.resultado), "estatus": resultado.estatus},
+        )
+
+    def perform_update(self, serializer):
+        resultado_anterior = serializer.instance
+        prueba_muestra = resultado_anterior.prueba_muestra
+        before = {
+            "resultado": _safe_json_loads(resultado_anterior.resultado),
+            "estatus": resultado_anterior.estatus,
+            "observaciones": resultado_anterior.observaciones,
+        }
+        resultado = serializer.save()
+        after = {
+            "resultado": _safe_json_loads(resultado.resultado),
+            "estatus": resultado.estatus,
+            "observaciones": resultado.observaciones,
+        }
+        if before != after:
+            record_operational_event(
+                actor=self.request.user,
+                action="resultado.actualizado_manual",
+                entity_type="resultado",
+                entity_id=resultado.id,
+                entity_label=f"{prueba_muestra.prueba.acronimo} · {prueba_muestra.muestra_id}",
+                muestra=prueba_muestra.muestra,
+                prueba_muestra=prueba_muestra,
+                detail="Resultado actualizado mediante el endpoint directo.",
+                before=before,
+                after=after,
+            )
 
     def destroy(self, request, *args, **kwargs):
         return Response(
@@ -1444,6 +1487,19 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         prueba_muestra.estatus = "rechazado"
         prueba_muestra.is_revisada = False
         prueba_muestra.save(update_fields=["estatus", "is_revisada"])
+        record_operational_event(
+            actor=request.user,
+            action="resultado.invalidado",
+            entity_type="resultado",
+            entity_id=resultado.id,
+            entity_label=f"{prueba_muestra.prueba.acronimo} · {prueba_muestra.muestra_id}",
+            muestra=prueba_muestra.muestra,
+            prueba_muestra=prueba_muestra,
+            detail="Resultado invalidado.",
+            reason=reason,
+            before={"estatus": previous_status},
+            after={"estatus": "rechazado", "prueba_estatus": "rechazado"},
+        )
         return Response(ResultadoSerializer(resultado, context=self.get_serializer_context()).data)
 
     def _save_result_payload(
@@ -1525,6 +1581,8 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         }
 
         result = _active_result_for(prueba_muestra)
+        previous_payload = _safe_json_loads(result.resultado) if result else {}
+        result_was_created = result is None
         fecha_dt = timezone.now()
         if fecha_medicion:
             try:
@@ -1579,6 +1637,21 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             if lote:
                 lote.recalcular_estado(save=True)
 
+        record_operational_event(
+            actor=request.user,
+            action="resultado.registrado" if result_was_created else "resultado.actualizado",
+            entity_type="resultado",
+            entity_id=result.id,
+            entity_label=f"{prueba_muestra.prueba.acronimo} · {prueba_muestra.muestra_id}",
+            muestra=prueba_muestra.muestra,
+            prueba_muestra=prueba_muestra,
+            detail=("Resultado registrado." if result_was_created else "Resultado actualizado."),
+            reason=str(request.data.get("motivo_cambio") or "").strip(),
+            before={"payload": previous_payload} if previous_payload else {},
+            after={"payload": payload, "estatus": result.estatus, "estado_limite": prueba_muestra.estado_limite},
+            metadata={"modo": "borrador" if estatus == "pendiente" else "confirmado"},
+        )
+
         if compact_response:
             return Response({"detail": "Resultado guardado."})
 
@@ -1608,10 +1681,11 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 motivo_cambio=observaciones or 'Modificación durante revisión'
             )
 
+        estatus_anterior = resultado.estatus
         RevisionResultado.objects.create(
             resultado=resultado,
             usuario_revision=request.user,
-            estatus_anterior=resultado.estatus,
+            estatus_anterior=estatus_anterior,
             estatus_nuevo=estatus_nuevo,
             observaciones=observaciones
         )
@@ -1619,6 +1693,21 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         serializer = CreateResultadoSerializer(resultado, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+
+        prueba_muestra = resultado.prueba_muestra
+        record_operational_event(
+            actor=request.user,
+            action="resultado.revisado",
+            entity_type="resultado",
+            entity_id=resultado.id,
+            entity_label=f"{prueba_muestra.prueba.acronimo} · {prueba_muestra.muestra_id}",
+            muestra=prueba_muestra.muestra,
+            prueba_muestra=prueba_muestra,
+            detail="Resultado revisado.",
+            reason=observaciones,
+            before={"estatus": estatus_anterior},
+            after={"estatus": resultado.estatus},
+        )
 
         return Response(serializer.data)
 
@@ -2605,6 +2694,25 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def result_history(self, request, resultado_id=None):
         resultado = get_object_or_404(self.get_queryset().select_related("usuario_medicion", "prueba_muestra", "prueba_muestra__prueba"), pk=resultado_id)
+        corrections = list(
+            resultado.historico.select_related("usuario_modificacion", "usuario_medicion")
+            .order_by("fecha_modificacion", "id")
+        )
+        current_payload = _safe_json_loads(resultado.resultado)
+
+        def summary(payload, fallback=""):
+            values = [
+                str(value.get("value_label") or value.get("value"))
+                for value in _flatten_payload_values(payload)
+                if value.get("value") not in [None, ""]
+            ]
+            return " / ".join(values) or fallback
+
+        # Each HistoricoResultado stores the value immediately *before* that
+        # correction. The following row's previous value is therefore the
+        # prior row's new value; only the final correction ends at the current
+        # Resultado payload.
+        initial_payload = _safe_json_loads(corrections[0].resultado_anterior) if corrections else current_payload
         history = []
         history.append({
             "id": f"initial-{resultado.id}",
@@ -2612,21 +2720,27 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "fecha": resultado.fecha_registro,
             "usuario": _user_payload(resultado.usuario_medicion),
             "valor_anterior": None,
-            "valor_nuevo": _result_summary(resultado),
+            "valor_nuevo": summary(initial_payload, _result_summary(resultado)),
             "justificacion": "Resultado inicial registrado.",
-            "payload": _safe_json_loads(resultado.resultado),
+            "payload": initial_payload,
         })
-        for item in resultado.historico.select_related("usuario_modificacion", "usuario_medicion").order_by("-fecha_modificacion"):
+        for index, item in enumerate(corrections):
             old_payload = _safe_json_loads(item.resultado_anterior)
+            next_payload = (
+                _safe_json_loads(corrections[index + 1].resultado_anterior)
+                if index + 1 < len(corrections)
+                else current_payload
+            )
             history.append({
                 "id": item.id,
                 "type": "correction",
                 "fecha": item.fecha_modificacion,
                 "usuario": _user_payload(item.usuario_modificacion),
-                "valor_anterior": " / ".join([str(v.get("value_label") or v.get("value")) for v in _flatten_payload_values(old_payload) if v.get("value") not in [None, ""]]) or item.resultado_anterior,
-                "valor_nuevo": _result_summary(resultado),
+                "valor_anterior": summary(old_payload, item.resultado_anterior),
+                "valor_nuevo": summary(next_payload, resultado.resultado),
                 "justificacion": item.motivo_cambio,
                 "payload": old_payload,
+                "payload_nuevo": next_payload,
             })
         revisions = [
             {
@@ -2641,7 +2755,11 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             }
             for rev in resultado.revisiones.select_related("usuario_revision").order_by("-fecha_revision")
         ]
-        return Response({"resultado": ResultadoSerializer(resultado, context=self.get_serializer_context()).data, "history": history + revisions})
+        timeline = sorted(
+            history + revisions,
+            key=lambda item: item["fecha"].isoformat() if item["fecha"] else "",
+        )
+        return Response({"resultado": ResultadoSerializer(resultado, context=self.get_serializer_context()).data, "history": timeline})
 
     @action(detail=False, methods=["post"])
     def correct_result(self, request, resultado_id=None):
@@ -2710,6 +2828,21 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         if st.muestra and st.muestra.lote:
             st.muestra.lote.recalcular_estado(save=True)
 
+        record_operational_event(
+            actor=request.user,
+            action="resultado.corregido",
+            entity_type="resultado",
+            entity_id=resultado.id,
+            entity_label=f"{st.prueba.acronimo} · {st.muestra_id}",
+            muestra=st.muestra,
+            prueba_muestra=st,
+            detail="Resultado corregido durante revisión.",
+            reason=justificacion,
+            before={"payload": old_payload},
+            after={"payload": new_payload, "estado_limite": st.estado_limite},
+            metadata={"resultado_id": resultado.id, "prueba": st.prueba.acronimo},
+        )
+
         return Response({"detail": "Resultado corregido.", "resultado": ResultadoSerializer(resultado, context=self.get_serializer_context()).data})
 
     @action(detail=False, methods=["post"])
@@ -2745,6 +2878,20 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         _sync_sample_completion_from_tests(muestra)
         if muestra.is_revisado and muestra.lote:
             muestra.lote.recalcular_estado(save=True)
+
+        record_operational_event(
+            actor=request.user,
+            action="resultado.revisado",
+            entity_type="prueba_muestra",
+            entity_id=prueba_muestra.id,
+            entity_label=f"{prueba_muestra.prueba.acronimo} · {muestra.id}",
+            muestra=muestra,
+            prueba_muestra=prueba_muestra,
+            detail="Resultado marcado como revisado.",
+            reason=request.data.get("observaciones") or "",
+            before={"is_revisada": False, "estatus": "completado"},
+            after={"is_revisada": True, "estatus": "aprobado"},
+        )
 
         return Response({"detail": "Resultado marcado como revisado."})
 
@@ -2797,6 +2944,18 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             _sync_sample_completion_from_tests(muestra)
 
         lote.recalcular_estado(save=True)
+        record_operational_event(
+            actor=request.user,
+            action="lote.revision_completada",
+            entity_type="lote",
+            entity_id=lote.id,
+            entity_label=lote.id,
+            lote=lote,
+            detail="Revisión masiva del lote completada.",
+            reason=request.data.get("observaciones") or "",
+            metadata={"pruebas_revisadas": count},
+            after={"estado": lote.estado},
+        )
         return Response({"detail": "Revisión del lote completada.", "updated": count})
 
     @action(detail=False, methods=["get"])
@@ -2867,21 +3026,60 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "interpretacion": interpretation,
         })
 
+    @action(detail=False, methods=["get"])
+    def interpretation_versions(self, request, muestra_id=None):
+        muestra = get_object_or_404(self._scope_samples(Muestra.objects), pk=muestra_id)
+        versions = VersionInterpretacion.objects.filter(muestra=muestra).select_related("creado_por")
+        return Response(VersionInterpretacionSerializer(versions, many=True).data)
+
     @action(detail=False, methods=["patch", "post"])
     def save_interpretation_sample(self, request, muestra_id=None):
         from apps.muestras.api.models.muestras.index import Muestra
         muestra = get_object_or_404(self._scope_samples(Muestra.objects), pk=muestra_id)
-        data = {
-            "conclusion": request.data.get("conclusion") or "",
-            "comentarios_predefinidos": request.data.get("comentarios_predefinidos") or [],
-            "comentarios_manuales": request.data.get("comentarios_manuales") or [],
-            "graficas_activas": bool(request.data.get("graficas_activas", True)),
-            "graficas_seleccionadas": request.data.get("graficas_seleccionadas") or [],
-            "updated_at": timezone.now().isoformat(),
-            "updated_by": request.user.pk,
-        }
-        _set_interpretation_data(muestra, data)
-        return Response({"detail": "Interpretación guardada.", "interpretacion": data})
+        reason = str(request.data.get("motivo") or "").strip()
+        with transaction.atomic():
+            # Serializa las versiones por muestra; dos guardados simultáneos no
+            # pueden reutilizar el mismo consecutivo.
+            muestra = Muestra.objects.select_for_update().get(pk=muestra.pk)
+            previous_interpretation = json.loads(json.dumps(_get_interpretation_data(muestra), default=str))
+            data = {
+                "conclusion": request.data.get("conclusion") or "",
+                "comentarios_predefinidos": request.data.get("comentarios_predefinidos") or [],
+                "comentarios_manuales": request.data.get("comentarios_manuales") or [],
+                "graficas_activas": bool(request.data.get("graficas_activas", True)),
+                "graficas_seleccionadas": request.data.get("graficas_seleccionadas") or [],
+                "updated_at": timezone.now().isoformat(),
+                "updated_by": request.user.pk,
+            }
+            _set_interpretation_data(muestra, data)
+            last_version = (
+                VersionInterpretacion.objects.filter(muestra=muestra)
+                .order_by("-version")
+                .values_list("version", flat=True)
+                .first()
+            )
+            version = VersionInterpretacion.objects.create(
+                muestra=muestra,
+                version=(last_version or 0) + 1,
+                contenido=data,
+                motivo=reason,
+                origen="manual",
+                creado_por=request.user,
+            )
+            record_operational_event(
+                actor=request.user,
+                action="interpretacion.guardada",
+                entity_type="interpretacion",
+                entity_id=version.id,
+                entity_label=f"Interpretación {muestra.id} v{version.version}",
+                muestra=muestra,
+                detail=f"Interpretación de la muestra guardada como versión {version.version}.",
+                reason=reason,
+                before=previous_interpretation,
+                after=data,
+                metadata={"origen_interpretacion": "manual", "version": version.version},
+            )
+        return Response({"detail": "Interpretación guardada.", "interpretacion": data, "version": version.version})
 
     @action(detail=False, methods=["get"])
     def interpretation_trends(self, request, muestra_id=None):

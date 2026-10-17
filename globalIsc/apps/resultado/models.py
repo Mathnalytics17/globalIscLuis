@@ -4,6 +4,7 @@ from apps.resultado.api.models.index import (
     HistoricoResultado,
     Resultado,
     RevisionResultado,
+    VersionInterpretacion,
 )
 
-__all__ = ["HistoricoResultado", "Resultado", "RevisionResultado"]
+__all__ = ["HistoricoResultado", "Resultado", "RevisionResultado", "VersionInterpretacion"]

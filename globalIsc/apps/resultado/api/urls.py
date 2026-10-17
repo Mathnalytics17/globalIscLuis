@@ -26,5 +26,6 @@ urlpatterns = [
     path("lubrication/review-results/sample-tests/<int:prueba_muestra_id>/mark-reviewed/", ResultadoViewSet.as_view({"post": "mark_sample_test_reviewed"}), name="review-results-mark-reviewed"),
     path("lubrication/interpretation/batches/<str:lote_id>/", ResultadoViewSet.as_view({"get": "interpretation_batch_detail"}), name="interpretation-batch-detail"),
     path("lubrication/interpretation/samples/<str:muestra_id>/trends/", ResultadoViewSet.as_view({"get": "interpretation_trends"}), name="interpretation-trends"),
+    path("lubrication/interpretation/samples/<str:muestra_id>/versions/", ResultadoViewSet.as_view({"get": "interpretation_versions"}), name="interpretation-versions"),
     path("lubrication/interpretation/samples/<str:muestra_id>/", ResultadoViewSet.as_view({"get": "interpretation_sample", "patch": "save_interpretation_sample", "post": "save_interpretation_sample"}), name="interpretation-sample"),
 ]

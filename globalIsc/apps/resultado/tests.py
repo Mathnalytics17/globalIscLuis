@@ -23,7 +23,8 @@ from apps.muestras.api.models.muestras.index import Muestra
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.muestraAtributoTecnico.index import MuestraAtributoTecnico
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
-from apps.resultado.api.models.index import Resultado
+from apps.resultado.api.models.index import HistoricoResultado, Resultado, VersionInterpretacion
+from apps.muestras.api.models.auditoria import EventoAuditoriaOperativa
 from apps.resultado.api.views.index import _sample_review_status
 from apps.users.api.models.index import User
 
@@ -277,6 +278,59 @@ class ResultEntryTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertIn("groups", response.data)
+
+    def test_saving_interpretation_creates_an_immutable_version_and_event(self):
+        response = self.client.patch(
+            f"/api/lubrication/interpretation/samples/{self.muestra.id}/",
+            {
+                "conclusion": "El activo puede continuar en operación.",
+                "comentarios_predefinidos": ["Sin condición crítica."],
+                "comentarios_manuales": [],
+                "graficas_activas": True,
+                "graficas_seleccionadas": [self.prueba.acronimo],
+                "motivo": "Primera interpretación técnica.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        version = VersionInterpretacion.objects.get(muestra=self.muestra)
+        self.assertEqual(version.version, 1)
+        self.assertEqual(version.contenido["conclusion"], "El activo puede continuar en operación.")
+        self.assertTrue(EventoAuditoriaOperativa.objects.filter(
+            accion="interpretacion.guardada",
+            muestra=self.muestra,
+            entidad_id=str(version.id),
+        ).exists())
+
+    def test_result_history_reconstructs_each_correction_transition(self):
+        def payload(value):
+            return json.dumps({"values": [{"key": "valor", "value": value, "value_label": value}]})
+
+        result = Resultado.objects.create(
+            prueba_muestra=self.sample_test,
+            resultado=payload("3"),
+            fecha_medicion=timezone.now(),
+            usuario_medicion=self.user,
+            estatus="preliminar",
+        )
+        for previous in ("1", "2"):
+            HistoricoResultado.objects.create(
+                resultado=result,
+                resultado_anterior=payload(previous),
+                fecha_medicion_anterior=result.fecha_medicion,
+                usuario_medicion=self.user,
+                usuario_modificacion=self.user,
+                motivo_cambio=f"Corrección hacia el valor siguiente desde {previous}.",
+            )
+
+        response = self.client.get(
+            f"/api/lubrication/review-results/results/{result.id}/history/"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        corrections = [item for item in response.data["history"] if item["type"] == "correction"]
+        self.assertEqual([(item["valor_anterior"], item["valor_nuevo"]) for item in corrections], [("1", "2"), ("2", "3")])
 
     def test_confirm_composite_result_keeps_full_payload_and_short_sample_value(self):
         values = []

@@ -50,6 +50,7 @@ from apps.misc.api.services.limit_contract import (
     test_limit_leaves as _test_limit_leaves,
 )
 from apps.muestras.api.models.muestras.index import Muestra
+from apps.muestras.services.operational_audit import record_operational_event
 from apps.muestras.api.services.limit_engine import resolve_limit_for_result, resolve_and_evaluate_result
 
 
@@ -59,6 +60,52 @@ class SoftDeleteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     default_read_permission = "config_tecnica.ver"
     default_write_permission = "config_tecnica.editar"
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+
+    def _audit_snapshot(self, instance):
+        """Usa el contrato de la API, no el __dict__ interno del modelo."""
+        return self.get_serializer(instance).data
+
+    def _record_configuration_event(self, *, instance, action, detail, before=None, after=None, metadata=None, origin="ui"):
+        model_name = instance._meta.model_name
+        record_operational_event(
+            actor=self.request.user,
+            action=action,
+            entity_type=f"configuracion.{model_name}",
+            entity_id=instance.pk,
+            entity_label=str(instance),
+            detail=detail,
+            before=before or {},
+            after=after or {},
+            metadata=metadata or {},
+            origin=origin,
+        )
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        instance = self.get_serializer_class().Meta.model.objects.get(pk=response.data["id"])
+        self._record_configuration_event(
+            instance=instance,
+            action=f"configuracion.{instance._meta.model_name}.creada",
+            detail="Elemento de configuración técnica creado.",
+            after=self._audit_snapshot(instance),
+        )
+        return response
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        before = self._audit_snapshot(instance)
+        response = super().update(request, *args, **kwargs)
+        instance.refresh_from_db()
+        after = self._audit_snapshot(instance)
+        if before != after:
+            self._record_configuration_event(
+                instance=instance,
+                action=f"configuracion.{instance._meta.model_name}.actualizada",
+                detail="Elemento de configuración técnica actualizado.",
+                before=before,
+                after=after,
+            )
+        return response
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -74,13 +121,27 @@ class SoftDeleteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         return queryset
 
     def perform_destroy(self, instance):
+        before = self._audit_snapshot(instance)
         instance.soft_delete()
+        self._record_configuration_event(
+            instance=instance,
+            action=f"configuracion.{instance._meta.model_name}.eliminada",
+            detail="Elemento de configuración técnica desactivado.",
+            before=before,
+            after=self._audit_snapshot(instance),
+        )
 
     @action(detail=True, methods=["post"])
     def restore(self, request, pk=None):
         base_queryset = self.queryset if self.queryset is not None else self.get_queryset()
         instance = base_queryset.get(pk=pk)
         instance.restore()
+        self._record_configuration_event(
+            instance=instance,
+            action=f"configuracion.{instance._meta.model_name}.restaurada",
+            detail="Elemento de configuración técnica restaurado.",
+            after=self._audit_snapshot(instance),
+        )
         return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
 
 
@@ -154,12 +215,84 @@ class CatalogoTecnicoVersionViewSet(SoftDeleteViewSet):
     @transaction.atomic
     def perform_create(self, serializer):
         catalogo = serializer.validated_data["catalogo"]
+        # A technical version represents an immutable edition of the catalog.
+        # The first implementation only changed ``version_actual`` and left the
+        # new edition without items. Besides being surprising for the user, it
+        # made a new version unusable in limit matrices until every item was
+        # entered again. Capture the current edition before changing the pointer
+        # and copy its complete item/value contract into the new one.
+        version_origen = catalogo.version_actual
+        # Repair-friendly fallback for editions made before cloning existed:
+        # if the current edition is empty, start from the latest edition that
+        # actually contains items instead of propagating the empty contract.
+        if version_origen and not CatalogoTecnicoItem.objects.filter(
+            catalogo=catalogo,
+            version=version_origen,
+        ).exists():
+            version_origen = CatalogoTecnicoVersion.objects.filter(
+                catalogo=catalogo,
+                items__isnull=False,
+            ).distinct().order_by("-numero", "-id").first() or version_origen
         numero = serializer.validated_data.get("numero")
         if not numero:
             numero = (CatalogoTecnicoVersion.objects.filter(catalogo=catalogo).aggregate(maximo=Max("numero"))["maximo"] or 0) + 1
         version = serializer.save(numero=numero)
+
+        if version_origen:
+            items_origen = CatalogoTecnicoItem.objects.filter(
+                catalogo=catalogo,
+                version=version_origen,
+            ).prefetch_related("valores")
+            for item_origen in items_origen:
+                item_nuevo = CatalogoTecnicoItem.objects.create(
+                    catalogo=catalogo,
+                    version=version,
+                    nombre=item_origen.nombre,
+                    codigo=item_origen.codigo,
+                    descripcion=item_origen.descripcion,
+                    metadata=item_origen.metadata,
+                    activo=item_origen.activo,
+                    deleted_at=item_origen.deleted_at,
+                )
+                CatalogoTecnicoItemValor.objects.bulk_create([
+                    CatalogoTecnicoItemValor(
+                        item=item_nuevo,
+                        campo=valor.campo,
+                        valor=valor.valor,
+                    )
+                    for valor in item_origen.valores.all()
+                ])
+
         catalogo.version_actual = version
         catalogo.save(update_fields=["version_actual", "updated_at"])
+
+        # Used by the audit event created by the base ViewSet. The reference is
+        # deliberately human-readable so Trazabilidad can explain the lineage
+        # without exposing raw IDs.
+        self._version_origen = version_origen
+
+    def create(self, request, *args, **kwargs):
+        """Create a catalog version with explicit lineage in Trazabilidad."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        version = serializer.instance
+        self._record_configuration_event(
+            instance=version,
+            action="catalogos.version_creada",
+            detail="Nueva versión de catálogo creada a partir de la versión vigente.",
+            before=(
+                self._audit_snapshot(self._version_origen)
+                if getattr(self, "_version_origen", None) else {}
+            ),
+            after=self._audit_snapshot(version),
+            metadata={
+                "version_origen": getattr(self._version_origen, "numero", None),
+                "items_copiados": version.items.count(),
+            },
+        )
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     @transaction.atomic
     def perform_update(self, serializer):
@@ -499,6 +632,7 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
         source = self._version_object(pk)
         if not source:
             return Response({"detail": "La versión solicitada no existe."}, status=status.HTTP_404_NOT_FOUND)
+        before = self._audit_snapshot(source)
         # Exactly one default version per test. Assigned sample tests retain
         # their own source foreign key and are intentionally not touched.
         PruebaFuenteLimite.objects.filter(prueba_id=source.prueba_id).exclude(pk=source.pk).update(activo=False)
@@ -506,6 +640,13 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
         source.publicada = True
         source.deleted_at = None
         source.save(update_fields=["activo", "publicada", "deleted_at", "updated_at"])
+        self._record_configuration_event(
+            instance=source,
+            action="limites.version_activada",
+            detail="Versión de límites publicada como vigente para nuevas asignaciones.",
+            before=before,
+            after=self._audit_snapshot(source),
+        )
         return Response(self.get_serializer(source).data)
 
     @action(detail=True, methods=["post"], url_path="deactivate")
@@ -519,14 +660,23 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
                 {"detail": "No puede desactivar la versión vigente. Active primero otra versión."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        before = self._audit_snapshot(source)
         source.publicada = False
         source.save(update_fields=["publicada", "updated_at"])
+        self._record_configuration_event(
+            instance=source,
+            action="limites.version_despublicada",
+            detail="Versión histórica de límites retirada de publicación.",
+            before=before,
+            after=self._audit_snapshot(source),
+        )
         return Response(self.get_serializer(source).data)
 
     @action(detail=True, methods=["post"], url_path="generate-fields")
     @transaction.atomic
     def generate_fields(self, request, pk=None):
         fuente = self.get_object()
+        before = self._audit_snapshot(fuente)
         operador = request.data.get("operador") or "max"
         unidad = request.data.get("unidad") or ""
         fields = _build_limit_fields_from_prueba(
@@ -537,6 +687,15 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
             escala_comparacion_id=request.data.get("escala_comparacion") or None,
             modo_ordinal=request.data.get("modo_ordinal") or "orden",
             evaluacion_opciones=request.data.get("evaluacion_opciones"),
+        )
+        fuente.refresh_from_db()
+        self._record_configuration_event(
+            instance=fuente,
+            action="limites.campos_regenerados",
+            detail="Campos de la matriz de límites regenerados desde la estructura de la prueba.",
+            before=before,
+            after=self._audit_snapshot(fuente),
+            metadata={"campos_generados": len(fields)},
         )
         return Response(PruebaLimiteCampoSerializer(fields, many=True).data, status=status.HTTP_200_OK)
 
@@ -587,7 +746,7 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
     @action(detail=True, methods=["post"], url_path="import-matrix")
     @transaction.atomic
     def import_matrix(self, request, pk=None):
-        source = self.get_object(); upload = request.FILES.get("archivo")
+        source = self.get_object(); before = self._audit_snapshot(source); upload = request.FILES.get("archivo")
         if not upload or not upload.name.lower().endswith(".xlsx"): return Response({"detail": "Cargue la plantilla .xlsx."}, status=status.HTTP_400_BAD_REQUEST)
         try: sheet = load_workbook(BytesIO(upload.read()), read_only=True, data_only=True).active
         except Exception: return Response({"detail": "No se pudo leer el archivo Excel."}, status=status.HTTP_400_BAD_REQUEST)
@@ -616,6 +775,16 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
         if errors: transaction.set_rollback(True); return Response({"detail":"La importación no se aplicó.","errores":errors[:100]}, status=status.HTTP_400_BAD_REQUEST)
         for criterion, field_code, rule in updates:
             values = criterion.valores_limite or {}; values[field_code] = rule; criterion.valores_limite = values; criterion.save(update_fields=["valores_limite", "updated_at"])
+        source.refresh_from_db()
+        self._record_configuration_event(
+            instance=source,
+            action="limites.matriz_importada",
+            detail="Matriz de límites actualizada desde archivo Excel.",
+            before=before,
+            after=self._audit_snapshot(source),
+            metadata={"reglas_actualizadas": len(updates)},
+            origin="importacion",
+        )
         return Response({"actualizados": len(updates)})
 
     @action(detail=False, methods=["post"], url_path="configure")
@@ -635,6 +804,19 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
         prueba = Prueba.objects.prefetch_related(
             "resultados__divisiones__componentes"
         ).get(pk=request.data.get("prueba"))
+        # When a user starts from "Usar como base", preserve the exact
+        # version selected in the lineage event. Falling back to the active
+        # version keeps the API compatible with older clients.
+        base_source_id = request.data.get("version_base")
+        base_source = PruebaFuenteLimite.objects.filter(
+            prueba=prueba,
+            pk=base_source_id,
+        ).first() if base_source_id else None
+        if base_source is None:
+            base_source = PruebaFuenteLimite.objects.filter(prueba=prueba).order_by(
+                "-version", "-id"
+            ).first()
+        base_snapshot = self._audit_snapshot(base_source) if base_source else {}
         source_type = request.data.get("fuente") or "catalogos"
         catalogs = request.data.get("catalogos") or []
         mode = request.data.get("modo_seleccion") or "seleccionar_asignacion"
@@ -685,7 +867,13 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
                             field_config,
                         )
             except ValueError as error:
-                return Response({"limites": [str(error)]}, status=status.HTTP_400_BAD_REQUEST)
+                # ``limites`` remains for compatibility, while the explicit
+                # message tells the UI which visible rule needs attention.
+                return Response({
+                    "detail": str(error),
+                    "limites": [str(error)],
+                    "errores_campos": [str(error)],
+                }, status=status.HTTP_400_BAD_REQUEST)
 
         has_catalog_fields = any(
             item.get("origen_limite") == "catalogo"
@@ -829,6 +1017,19 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
                 )
 
         source.refresh_from_db()
+        self._record_configuration_event(
+            instance=source,
+            action="limites.version_creada",
+            detail="Nueva versión de límites configurada a partir de la versión anterior.",
+            before=base_snapshot,
+            after=self._audit_snapshot(source),
+            metadata={
+                "version": source.version,
+                "publicada": source.publicada,
+                "version_origen": base_source.version if base_source else None,
+                "fuente_origen_id": base_source.id if base_source else None,
+            },
+        )
         return Response(self.get_serializer(source).data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="resolve-preview")
@@ -872,7 +1073,17 @@ class PruebaLimiteCampoViewSet(SoftDeleteViewSet):
     ordering_fields = ["orden", "nombre", "codigo", "created_at"]
 
     def get_queryset(self):
-        queryset = self.queryset.all() if self.request.query_params.get("historial") in {"1", "true", "True"} else super().get_queryset()
+        historial = self.request.query_params.get("historial") in {"1", "true", "True"}
+        queryset = self.queryset.all() if historial else super().get_queryset()
+        # The comments screen is an editor for the effective configuration.
+        # Historical versions remain accessible to assignment/review flows via
+        # ``historial=true`` but must not create duplicate anonymous cards.
+        if not historial:
+            queryset = queryset.filter(
+                fuente_limite__activo=True,
+                fuente_limite__publicada=True,
+                fuente_limite__deleted_at__isnull=True,
+            )
         fuente = self.request.query_params.get("fuente_limite")
         prueba = self.request.query_params.get("prueba")
         if fuente:
@@ -1085,8 +1296,18 @@ def _validate_semaphore_rule(rule, label, field_config=None):
         "eq": ["valor_esperado"],
         "neq": ["valor_esperado"],
     }.get(operator, [])
-    if any(rule.get(key) in [None, ""] for key in required):
-        raise ValueError(f"{label}: complete todos los valores requeridos por el operador.")
+    missing = [key for key in required if rule.get(key) in [None, ""]]
+    if missing:
+        labels = {
+            "min_critico": "mínimo crítico",
+            "min_aceptable": "mínimo aceptable",
+            "max_aceptable": "máximo aceptable",
+            "max_critico": "máximo crítico",
+            "valor_esperado": "valor esperado",
+        }
+        raise ValueError(
+            f"{label}: falta {', '.join(labels.get(key, key) for key in missing)}."
+        )
 
     if comparison_type in {"escala", "escala_ordinal", "booleano"}:
         return None

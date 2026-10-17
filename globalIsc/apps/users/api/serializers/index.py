@@ -422,12 +422,43 @@ class UserAuditLogSerializer(serializers.ModelSerializer):
     actor_email = serializers.EmailField(source="actor.email", read_only=True)
     target_user_email = serializers.EmailField(source="target_user.email", read_only=True)
     empresa_nombre = serializers.CharField(source="empresa.nombre", read_only=True)
+    actor_nombre = serializers.SerializerMethodField()
+    target_user_nombre = serializers.SerializerMethodField()
+    empresa_efectiva_id = serializers.SerializerMethodField()
+    empresa_efectiva_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = UserAuditLog
         fields = [
             "id", "actor", "actor_email", "target_user", "target_user_email",
-            "empresa", "empresa_nombre", "action", "module", "detail",
+            "empresa", "empresa_nombre", "empresa_efectiva_id", "empresa_efectiva_nombre",
+            "actor_nombre", "target_user_nombre", "action", "module", "detail",
             "metadata", "ip_address", "user_agent", "created_at",
         ]
         read_only_fields = fields
+
+    @staticmethod
+    def _display_name(user):
+        if not user:
+            return ""
+        return user.get_full_name() or user.email or str(user.pk)
+
+    def get_actor_nombre(self, obj):
+        # Login events have no authenticated actor yet; the target account is
+        # the meaningful person to display in that situation.
+        return self._display_name(obj.actor or obj.target_user) or "Sistema"
+
+    def get_target_user_nombre(self, obj):
+        return self._display_name(obj.target_user)
+
+    @staticmethod
+    def _effective_company(obj):
+        return obj.empresa or getattr(obj.actor, "empresa", None) or getattr(obj.target_user, "empresa", None)
+
+    def get_empresa_efectiva_id(self, obj):
+        company = self._effective_company(obj)
+        return company.id if company else None
+
+    def get_empresa_efectiva_nombre(self, obj):
+        company = self._effective_company(obj)
+        return company.nombre if company else "Global / sin empresa asignada"

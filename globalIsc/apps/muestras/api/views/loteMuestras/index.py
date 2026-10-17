@@ -9,6 +9,9 @@ from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPer
 from apps.users.api.models.index import User
 from apps.users.api.services import audit_user_action
 from django.utils import timezone
+from apps.muestras.api.models.auditoria import EventoAuditoriaOperativa
+from apps.muestras.api.serializers.auditoria import EventoAuditoriaOperativaSerializer
+from apps.muestras.services.operational_audit import record_operational_event
 
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
@@ -18,6 +21,19 @@ from apps.muestras.api.serializers.loteMuestras.index import (
     LoteMuestrasCreateSerializer,
      AddMuestrasToLoteSerializer,
 )
+
+
+def _lot_snapshot(lote):
+    return {
+        "estado": lote.estado,
+        "fecha_envio": lote.fecha_envio.isoformat() if lote.fecha_envio else None,
+        "fecha_recepcion": lote.fecha_recepcion.isoformat() if lote.fecha_recepcion else None,
+        "cliente_empresa": lote.cliente_empresa_id,
+        "tipo_gestion": lote.tipo_gestion_id,
+        "contacto_nombre": lote.contacto_nombre or "",
+        "contacto_email": lote.contacto_email or "",
+        "observaciones": lote.observaciones or "",
+    }
 
 
 class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
@@ -44,6 +60,7 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "partial_update": "lotes.editar",
         "destroy": "lotes.eliminar",
         "recalcular_estado": "lotes.recalcular_estado",
+        "timeline": "lotes.ver",
         "add_samples": "muestras.crear",
         "cancel": "lotes.eliminar",
         "reopen": "lotes.recalcular_estado",
@@ -236,10 +253,48 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         lote = serializer.save()
+        record_operational_event(
+            actor=request.user,
+            action="lote.creado",
+            entity_type="lote",
+            entity_id=lote.id,
+            entity_label=lote.id,
+            lote=lote,
+            detail="Lote de muestras creado.",
+            after=_lot_snapshot(lote),
+        )
 
         response_serializer = LoteMuestrasDetailSerializer(lote, context=self.get_serializer_context())
 
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    def perform_update(self, serializer):
+        before = _lot_snapshot(serializer.instance)
+        lote = serializer.save()
+        after = _lot_snapshot(lote)
+        if before != after:
+            record_operational_event(
+                actor=self.request.user,
+                action="lote.actualizado",
+                entity_type="lote",
+                entity_id=lote.id,
+                entity_label=lote.id,
+                lote=lote,
+                detail="Información general del lote actualizada.",
+                before=before,
+                after=after,
+            )
+
+    @action(detail=True, methods=["get"], url_path="timeline")
+    def timeline(self, request, pk=None):
+        lote = self.get_object()
+        queryset = EventoAuditoriaOperativa.objects.filter(lote=lote).select_related(
+            "actor", "empresa", "muestra", "prueba_muestra", "reporte", "maquina", "punto_muestreo"
+        )
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            return self.get_paginated_response(EventoAuditoriaOperativaSerializer(page, many=True).data)
+        return Response(EventoAuditoriaOperativaSerializer(queryset, many=True).data)
 
     def destroy(self, request, *args, **kwargs):
         lote = self.get_object()
@@ -258,12 +313,25 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         reason = str(request.data.get("reason") or "").strip()
         if not reason:
             return Response({"reason": ["Indique el motivo de cancelación."]}, status=status.HTTP_400_BAD_REQUEST)
+        previous_state = lote.estado
         lote.estado = "cancelado"
         lote.motivo_cancelacion = reason
         lote.fecha_cancelacion = timezone.now()
         lote.cancelado_por = request.user
         lote.save(update_fields=["estado", "motivo_cancelacion", "fecha_cancelacion", "cancelado_por", "fecha_actualizacion"])
         audit_user_action(request, "lotes.cancelar", empresa=lote.cliente_empresa, detail=reason, metadata={"lote_id": lote.id})
+        record_operational_event(
+            actor=request.user,
+            action="lote.cancelado",
+            entity_type="lote",
+            entity_id=lote.id,
+            entity_label=lote.id,
+            lote=lote,
+            detail="Lote cancelado.",
+            reason=reason,
+            before={"estado": previous_state},
+            after={"estado": "cancelado"},
+        )
         return Response(LoteMuestrasDetailSerializer(lote, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="reopen")
@@ -274,6 +342,17 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         lote.estado = "registrado" if lote.muestras.exists() else "borrador"
         lote.save(update_fields=["estado", "fecha_actualizacion"])
         audit_user_action(request, "lotes.reabrir", empresa=lote.cliente_empresa, metadata={"lote_id": lote.id})
+        record_operational_event(
+            actor=request.user,
+            action="lote.reabierto",
+            entity_type="lote",
+            entity_id=lote.id,
+            entity_label=lote.id,
+            lote=lote,
+            detail="Lote reabierto.",
+            before={"estado": "cancelado"},
+            after={"estado": lote.estado},
+        )
         return Response(LoteMuestrasDetailSerializer(lote, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="recalcular-estado")
@@ -320,6 +399,16 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
         lote.refresh_from_db()
         lote.recalcular_estado()
+        record_operational_event(
+            actor=request.user,
+            action="lote.muestras_agregadas",
+            entity_type="lote",
+            entity_id=lote.id,
+            entity_label=lote.id,
+            lote=lote,
+            detail="Se agregaron muestras al lote.",
+            metadata={"total_muestras": lote.muestras.count()},
+        )
 
         response_serializer = LoteMuestrasDetailSerializer(
             lote,

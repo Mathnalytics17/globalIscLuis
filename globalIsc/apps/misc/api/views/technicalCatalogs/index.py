@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
+from apps.muestras.services.operational_audit import record_operational_event
 
 from apps.misc.api.models.technicalCatalogs.index import (
     Condicion,
@@ -23,6 +24,32 @@ class BaseTechnicalCatalogViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     ordering_fields = ["nombre", "codigo", "created_at", "updated_at"]
 
+    def _snapshot(self, instance):
+        return self.get_serializer(instance).data
+
+    def _record_event(self, instance, action, detail, before=None, after=None):
+        record_operational_event(
+            actor=self.request.user,
+            action=action,
+            entity_type=f"configuracion.{instance._meta.model_name}",
+            entity_id=instance.pk,
+            entity_label=str(instance),
+            detail=detail,
+            before=before or {},
+            after=after or {},
+        )
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        self._record_event(instance, f"configuracion.{instance._meta.model_name}.creada", "Catálogo técnico creado.", after=self._snapshot(instance))
+
+    def perform_update(self, serializer):
+        before = self._snapshot(serializer.instance)
+        instance = serializer.save()
+        after = self._snapshot(instance)
+        if before != after:
+            self._record_event(instance, f"configuracion.{instance._meta.model_name}.actualizada", "Catálogo técnico actualizado.", before, after)
+
     def get_queryset(self):
         queryset = super().get_queryset()
         activo = self.request.query_params.get("activo")
@@ -34,15 +61,19 @@ class BaseTechnicalCatalogViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
+        before = self._snapshot(instance)
         instance.activo = False
         instance.save(update_fields=["activo", "updated_at"])
+        self._record_event(instance, f"configuracion.{instance._meta.model_name}.desactivada", "Catálogo técnico desactivado.", before, self._snapshot(instance))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"], url_path="reactivate")
     def reactivate(self, request, pk=None):
         instance = self.get_object()
+        before = self._snapshot(instance)
         instance.activo = True
         instance.save(update_fields=["activo", "updated_at"])
+        self._record_event(instance, f"configuracion.{instance._meta.model_name}.reactivada", "Catálogo técnico reactivado.", before, self._snapshot(instance))
         return Response(self.get_serializer(instance).data)
 
 

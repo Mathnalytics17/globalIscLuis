@@ -1,6 +1,7 @@
 import logging
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
@@ -18,6 +19,8 @@ from apps.muestras.api.serializers.muestras.index import (
     MuestraListSerializer,
     MuestraSerializer,
 )
+from apps.muestras.services.operational_audit import record_operational_event
+from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, PuntoMuestreo
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +111,7 @@ class MuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "history": "muestras.ver",
         "invalidate": "muestras.eliminar",
         "reactivate": "muestras.editar",
+        "measurement_point": "muestras.editar",
     }
 
     def get_queryset(self):
@@ -165,6 +169,18 @@ class MuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         muestra.invalidada_por = request.user
         muestra.save(update_fields=["estado_operativo", "motivo_invalidacion", "fecha_invalidacion", "invalidada_por"])
         muestra.historial.create(usuario=request.user, accion="invalidacion", cambios={"motivo": reason}, estado_nuevo={"status": "invalidada"})
+        record_operational_event(
+            actor=request.user,
+            action="muestra.invalidada",
+            entity_type="muestra",
+            entity_id=muestra.id,
+            entity_label=muestra.id,
+            muestra=muestra,
+            detail="Muestra invalidada.",
+            reason=reason,
+            before={"estado_operativo": "activa"},
+            after={"estado_operativo": "invalidada"},
+        )
         if muestra.lote:
             muestra.lote.recalcular_estado()
         return Response(MuestraSerializer(muestra, context=self.get_serializer_context()).data)
@@ -189,8 +205,82 @@ class MuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             cambios={"motivo": reason, "invalidacion_anterior": previous_reason},
             estado_nuevo={"status": "activa"},
         )
+        record_operational_event(
+            actor=request.user,
+            action="muestra.reactivada",
+            entity_type="muestra",
+            entity_id=muestra.id,
+            entity_label=muestra.id,
+            muestra=muestra,
+            detail="Muestra reactivada.",
+            reason=reason,
+            before={"estado_operativo": "invalidada", "motivo_invalidacion": previous_reason},
+            after={"estado_operativo": "activa"},
+        )
         if muestra.lote:
             muestra.lote.recalcular_estado()
+        return Response(MuestraSerializer(muestra, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=["put"], url_path="measurement-point")
+    @transaction.atomic
+    def measurement_point(self, request, pk=None):
+        """Set or clear the current sampling point without losing its history."""
+        muestra = self.get_object()
+        point_id = request.data.get("punto_muestreo_id")
+        point = None
+        if point_id not in (None, ""):
+            point = PuntoMuestreo.objects.filter(pk=point_id, activo=True).select_related("maquina").first()
+            if not point:
+                return Response({"punto_muestreo_id": ["El punto de medida no existe o está inactivo."]}, status=status.HTTP_400_BAD_REQUEST)
+            if not muestra.referencia_equipo_id:
+                return Response({"punto_muestreo_id": ["Primero seleccione un equipo registrado para la muestra."]}, status=status.HTTP_400_BAD_REQUEST)
+            if point.maquina_id != muestra.referencia_equipo_id:
+                return Response({"punto_muestreo_id": ["El punto de medida no pertenece al equipo seleccionado."]}, status=status.HTTP_400_BAD_REQUEST)
+
+        active = (
+            AsignacionPuntoMuestreo.objects.select_for_update()
+            .filter(muestra=muestra, activa=True)
+            .select_related("punto_muestreo")
+            .first()
+        )
+        if active and point and active.punto_muestreo_id == point.id:
+            return Response(MuestraSerializer(muestra, context=self.get_serializer_context()).data)
+
+        previous = (
+            {"id": active.punto_muestreo_id, "nombre": active.punto_muestreo.nombre}
+            if active else None
+        )
+        if active:
+            active.close()
+        if point:
+            AsignacionPuntoMuestreo.objects.create(
+                muestra=muestra,
+                punto_muestreo=point,
+                origen="manual",
+                asignado_por=request.user,
+            )
+
+        current = {"id": point.id, "nombre": point.nombre} if point else None
+        muestra.historial.create(
+            usuario=request.user,
+            accion="punto_muestreo",
+            cambios={"punto_muestreo": {"anterior": previous, "nuevo": current}},
+            estado_anterior={"punto_muestreo": previous},
+            estado_nuevo={"punto_muestreo": current},
+        )
+        record_operational_event(
+            actor=request.user,
+            action="muestra.punto_muestreo_asignado" if point else "muestra.punto_muestreo_desasignado",
+            entity_type="muestra",
+            entity_id=muestra.id,
+            entity_label=muestra.id,
+            muestra=muestra,
+            maquina=muestra.referencia_equipo,
+            punto_muestreo=point,
+            detail="Punto de medida actualizado para la muestra.",
+            before={"punto_muestreo": previous},
+            after={"punto_muestreo": current},
+        )
         return Response(MuestraSerializer(muestra, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["get"], url_path="history")
