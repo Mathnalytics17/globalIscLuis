@@ -14,11 +14,13 @@ from apps.muestras.api.serializers.auditoria import EventoAuditoriaOperativaSeri
 from apps.muestras.services.operational_audit import record_operational_event
 
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
+from apps.muestras.api.models.muestras.index import Muestra
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
 from apps.muestras.api.serializers.loteMuestras.index import (
     LoteMuestrasListSerializer,
     LoteMuestrasDetailSerializer,
     LoteMuestrasCreateSerializer,
+    LoteMuestraWorkspaceSerializer,
      AddMuestrasToLoteSerializer,
 )
 
@@ -61,10 +63,17 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "destroy": "lotes.eliminar",
         "recalcular_estado": "lotes.recalcular_estado",
         "timeline": "lotes.ver",
-        "add_samples": "muestras.crear",
+        "samples": "lotes.ver",
         "cancel": "lotes.eliminar",
         "reopen": "lotes.recalcular_estado",
     }
+
+    def get_required_permission(self):
+        # The same resource exposes the nested sample list (GET) and keeps the
+        # established add-samples endpoint (POST). Their permissions differ.
+        if getattr(self, "action", None) == "samples" and self.request.method != "GET":
+            return "muestras.crear"
+        return super().get_required_permission()
 
     def get_queryset(self):
         queryset = (
@@ -376,9 +385,39 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
         return Response(data)
 
-    @action(detail=True, methods=["post"], url_path="samples")
-    def add_samples(self, request, pk=None):
+    @action(detail=True, methods=["get", "post"], url_path="samples")
+    def samples(self, request, pk=None):
         lote = self.get_object()
+
+        if request.method == "GET":
+            queryset = (
+                Muestra.objects.filter(lote=lote)
+                .select_related("referencia_equipo", "lote__tipo_gestion")
+                .prefetch_related("asignaciones_punto_muestreo__punto_muestreo")
+                .order_by("-fecha_toma", "-fecha_registro", "-id")
+            )
+            search = str(request.query_params.get("search") or "").strip()
+            machine_id = request.query_params.get("machine_id")
+            sampling_point_id = request.query_params.get("sampling_point_id")
+            if search:
+                queryset = queryset.filter(
+                    Q(id__icontains=search)
+                    | Q(referencia_equipo__nombre__icontains=search)
+                    | Q(referencia_equipo__codigo_equipo__icontains=search)
+                    | Q(equipo_placa__icontains=search)
+                    | Q(asignaciones_punto_muestreo__punto_muestreo__nombre__icontains=search)
+                ).distinct()
+            if machine_id:
+                queryset = queryset.filter(referencia_equipo_id=machine_id)
+            if sampling_point_id:
+                queryset = queryset.filter(
+                    asignaciones_punto_muestreo__punto_muestreo_id=sampling_point_id,
+                    asignaciones_punto_muestreo__activa=True,
+                )
+
+            page = self.paginate_queryset(queryset)
+            serializer = LoteMuestraWorkspaceSerializer(page if page is not None else queryset, many=True)
+            return self.get_paginated_response(serializer.data) if page is not None else Response(serializer.data)
 
         if lote.estado == "cancelado":
             return Response(

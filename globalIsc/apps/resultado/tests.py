@@ -184,6 +184,47 @@ class ResultEntryTests(TestCase):
             "true",
         )
 
+    def test_excel_preview_accepts_valid_xlsx_without_worksheet_dimensions(self):
+        """XLSX producers may omit the optional worksheet dimension metadata."""
+        from io import BytesIO
+        import re
+        from zipfile import ZIP_DEFLATED, ZipFile
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from openpyxl import load_workbook
+
+        template = self.client.get(
+            "/api/lubrication/result-entry/excel/template/",
+            {"lote": self.lote.id, "modo": "por_muestra"},
+        )
+        self.assertEqual(template.status_code, 200, getattr(template, "data", None))
+        workbook = load_workbook(BytesIO(template.content))
+        workbook[str(self.muestra.id)]["L2"] = "12.5"
+        regular_output = BytesIO()
+        workbook.save(regular_output)
+
+        no_dimensions = BytesIO()
+        with ZipFile(BytesIO(regular_output.getvalue())) as source, ZipFile(no_dimensions, "w", ZIP_DEFLATED) as destination:
+            for item in source.infolist():
+                content = source.read(item.filename)
+                if item.filename.startswith("xl/worksheets/") and item.filename.endswith(".xml"):
+                    content = re.sub(br"<dimension[^>]*/>", b"", content)
+                destination.writestr(item, content)
+
+        upload = SimpleUploadedFile(
+            "resultados_sin_dimension.xlsx",
+            no_dimensions.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        preview = self.client.post(
+            "/api/lubrication/result-entry/excel/preview/",
+            {"file": upload},
+            format="multipart",
+        )
+        self.assertEqual(preview.status_code, 200, preview.data)
+        self.assertTrue(preview.data["valid"])
+        self.assertEqual(preview.data["rows_valid"], 1)
+
     def test_excel_import_applies_validated_values_as_draft(self):
         template = self.client.get(
             "/api/lubrication/result-entry/excel/template/",

@@ -1,9 +1,15 @@
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from datetime import timedelta
-from rest_framework.test import APIClient
+from rest_framework.exceptions import ValidationError
+from rest_framework.test import APIClient, APIRequestFactory
+
+from backend.api_exceptions import api_exception_handler
 
 from apps.misc.api.models.companies.index import Empresa
+from apps.activesTree.api.models.machines.index import Maquina
+from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, Carpeta, PuntoMuestreo
+from apps.misc.api.models.tipoGestionMuestra.index import TipoGestionMuestra
 from apps.misc.api.models.dynamicTechnicalConfig.index import (
     CatalogoTecnico,
     CatalogoTecnicoItem,
@@ -22,7 +28,7 @@ from apps.muestras.api.models.muestraAtributoTecnico.index import MuestraAtribut
 from apps.muestras.api.models.muestras.index import Muestra
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.auditoria import EventoAuditoriaOperativa
-from apps.muestras.api.serializers.loteMuestras.index import LoteMuestrasCreateSerializer
+from apps.muestras.api.serializers.loteMuestras.index import LoteMuestraWorkspaceSerializer, LoteMuestrasCreateSerializer
 from apps.muestras.api.serializers.muestras.index import CreateMuestraSerializer
 from apps.muestras.services.operational_audit import record_operational_event
 from apps.muestras.api.services.limit_engine import (
@@ -44,6 +50,70 @@ from apps.users.api.models.index import (
     User,
     UserCompanyProfile,
 )
+
+
+class ApiExceptionContractTests(SimpleTestCase):
+    def test_validation_error_keeps_legacy_fields_and_adds_canonical_metadata(self):
+        request = APIRequestFactory().post("/api/lubrication/sample-batches/")
+        response = api_exception_handler(
+            ValidationError({"muestras": [{"punto_muestreo": ["Seleccione un punto."]}]}),
+            {"request": request},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["muestras"][0]["punto_muestreo"][0], "Seleccione un punto.")
+        self.assertEqual(response.data["error"]["code"], "validation_error")
+        self.assertEqual(response.data["error"]["message"], "Seleccione un punto.")
+        self.assertEqual(response.data["error"]["fields"]["muestras"][0]["punto_muestreo"][0], "Seleccione un punto.")
+
+
+class LoteMuestraWorkspaceSerializerTests(TestCase):
+    def setUp(self):
+        self.empresa = Empresa.objects.create(nombre="Empresa tablero lotes")
+        self.user = User.objects.create_user(
+            email="workspace-lotes@example.com",
+            password="test-password",
+            empresa=self.empresa,
+        )
+        self.tipo_gestion = TipoGestionMuestra.objects.create(
+            nombre="Diagnóstico prioritario",
+            dias_habiles=3,
+        )
+        self.lote = LoteMuestras.objects.create(
+            tipo_cliente="registrado",
+            cliente_empresa=self.empresa,
+            contacto_nombre="Contacto",
+            fecha_envio=timezone.localdate(),
+            fecha_recepcion=timezone.localdate(),
+            tipo_gestion=self.tipo_gestion,
+            usuario_registro=self.user,
+        )
+        self.machine = Maquina.objects.create(empresa=self.empresa, nombre="Bomba principal", codigo_equipo="BP-01")
+        self.point = PuntoMuestreo.objects.create(maquina=self.machine, nombre="Reductor")
+
+    def test_workspace_row_keeps_its_own_asset_context_and_management_deadline(self):
+        sample = Muestra.objects.create(
+            lote=self.lote,
+            fecha_toma=timezone.now(),
+            tipo_muestra="aceite",
+            condicion="usada",
+            referencia_equipo=self.machine,
+            usuario_registro=self.user,
+        )
+        AsignacionPuntoMuestreo.objects.create(
+            muestra=sample,
+            punto_muestreo=self.point,
+            origen="lote",
+            asignado_por=self.user,
+        )
+
+        data = LoteMuestraWorkspaceSerializer(sample).data
+
+        self.assertEqual(data["equipo"]["label"], "BP-01")
+        self.assertEqual(data["punto_muestreo"]["nombre"], "Reductor")
+        self.assertTrue(data["plazo_entrega"]["configured"])
+        self.assertEqual(data["plazo_entrega"]["basis"], "habiles")
+        self.assertEqual(data["plazo_entrega"]["total_days"], 3)
 
 
 class SampleIdentifierTests(TestCase):
@@ -439,11 +509,11 @@ class DynamicLimitEngineTests(TestCase):
 
 class FixedSampleBatchExcelTests(TestCase):
     def setUp(self):
-        empresa = Empresa.objects.create(nombre="Global Oil Excel Test")
+        self.empresa = Empresa.objects.create(nombre="Global Oil Excel Test")
         self.user = User.objects.create_user(
             email="excel-engine@example.com",
             password="test-password",
-            empresa=empresa,
+            empresa=self.empresa,
         )
         self.catalog = CatalogoTecnico.objects.create(
             nombre="Grado de viscosidad",
@@ -505,13 +575,160 @@ class FixedSampleBatchExcelTests(TestCase):
 
         self.assertEqual(errors, [])
         self.assertEqual(
-            data["atributos_tecnicos"][str(self.catalog.id)],
+            data["atributos_tecnicos"][str(self.field.id)],
             {
                 "item": str(self.item.id),
                 "desconocido": False,
                 "campo_tecnico_muestra": str(self.field.id),
             },
         )
+
+    def test_excel_keeps_distinct_values_for_fields_that_share_a_catalog(self):
+        secondary_item = CatalogoTecnicoItem.objects.create(
+            catalogo=self.catalog,
+            nombre="SAE 10W-60",
+        )
+        shared_catalog_field = CampoTecnicoMuestra.objects.create(
+            nombre_visible="Campo grasa",
+            codigo="campo_grasa",
+            tipo_muestra="ambos",
+            catalogo=self.catalog,
+            visible_en_ingreso=True,
+            obligatorio=True,
+            orden=2,
+        )
+        workbook = generate_template_workbook(self.token)
+        ws = workbook["Aceites"]
+        columns = template_columns("aceite")
+        index = {key: position for position, (key, _) in enumerate(columns, start=1)}
+        ws.cell(2, index["fecha_toma"], timezone.now())
+        ws.cell(2, index["condicion"], "nueva")
+        ws.cell(2, index["referencia_marca"], "Referencia de prueba")
+        ws.cell(2, index[f"tecnico_{self.field.id}"], f"{self.item.id} | {self.item.nombre}")
+        ws.cell(
+            2,
+            index[f"tecnico_{shared_catalog_field.id}"],
+            f"{secondary_item.id} | {secondary_item.nombre}",
+        )
+
+        data, errors = parse_row(ws, 2, "aceite", technical_fields_by_type())
+
+        self.assertEqual(errors, [])
+        self.assertEqual(
+            data["atributos_tecnicos"][str(self.field.id)]["item"],
+            str(self.item.id),
+        )
+        self.assertEqual(
+            data["atributos_tecnicos"][str(shared_catalog_field.id)]["item"],
+            str(secondary_item.id),
+        )
+
+    def test_unknown_is_accepted_for_every_technical_field(self):
+        self.field.permite_desconocido = False
+        self.field.obligatorio = True
+        self.field.save(update_fields=["permite_desconocido", "obligatorio"])
+        self.catalog.permite_desconocido = False
+        self.catalog.save(update_fields=["permite_desconocido"])
+        workbook = generate_template_workbook(self.token)
+        ws = workbook["Aceites"]
+        columns = template_columns("aceite")
+        index = {key: position for position, (key, _) in enumerate(columns, start=1)}
+        ws.cell(2, index["fecha_toma"], timezone.now())
+        ws.cell(2, index["condicion"], "nueva")
+        ws.cell(2, index["referencia_marca"], "Referencia de prueba")
+        ws.cell(2, index[f"tecnico_{self.field.id}"], "DESCONOCIDO")
+
+        data, errors = parse_row(ws, 2, "aceite", technical_fields_by_type())
+
+        self.assertEqual(errors, [])
+        self.assertTrue(data["atributos_tecnicos"][str(self.field.id)]["desconocido"])
+
+    def test_preview_row_includes_human_readable_machine_and_sampling_point(self):
+        machine = Maquina.objects.create(nombre="Equipo de prueba", empresa=self.empresa)
+        point = PuntoMuestreo.objects.create(maquina=machine, nombre="Reductor principal")
+        workbook = generate_template_workbook(self.token)
+        ws = workbook["Aceites"]
+        columns = template_columns("aceite")
+        index = {key: position for position, (key, _) in enumerate(columns, start=1)}
+        ws.cell(2, index["fecha_toma"], timezone.now())
+        ws.cell(2, index["condicion"], "usada")
+        ws.cell(2, index["referencia_marca"], "Referencia de prueba")
+        ws.cell(2, index["punto_muestreo"], f"{point.id} | {machine.nombre} | {point.nombre}")
+        ws.cell(2, index[f"tecnico_{self.field.id}"], f"{self.item.id} | SAE 70W-90")
+
+        data, errors = parse_row(ws, 2, "aceite", technical_fields_by_type())
+
+        self.assertEqual(errors, [])
+        self.assertEqual(data["referencia_equipo"], str(machine.id))
+        self.assertEqual(data["referencia_equipo_nombre"], machine.nombre)
+        self.assertEqual(data["punto_muestreo"], str(point.id))
+        self.assertEqual(data["punto_muestreo_nombre"], point.nombre)
+
+    def test_preview_accepts_manual_machine_and_manual_sampling_point(self):
+        workbook = generate_template_workbook(self.token)
+        ws = workbook["Aceites"]
+        columns = template_columns("aceite")
+        index = {key: position for position, (key, _) in enumerate(columns, start=1)}
+        ws.cell(2, index["fecha_toma"], timezone.now())
+        ws.cell(2, index["condicion"], "usada")
+        ws.cell(2, index["referencia_marca"], "Referencia de prueba")
+        ws.cell(2, index["equipo_placa"], "TALLER-MANUAL-01")
+        ws.cell(2, index["punto_muestreo_manual"], "Reductor lado motor")
+        ws.cell(2, index[f"tecnico_{self.field.id}"], f"{self.item.id} | SAE 70W-90")
+
+        data, errors = parse_row(ws, 2, "aceite", technical_fields_by_type(), empresa_id=self.empresa.pk)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(data["equipo_placa"], "TALLER-MANUAL-01")
+        self.assertEqual(data["punto_muestreo_manual"], "Reductor lado motor")
+
+    def test_template_assets_are_scoped_to_the_selected_company(self):
+        other_company = Empresa.objects.create(nombre="Empresa ajena Excel Test")
+        own_machine = Maquina.objects.create(nombre="Equipo propio", empresa=self.empresa)
+        own_point = PuntoMuestreo.objects.create(maquina=own_machine, nombre="Punto propio")
+        foreign_machine = Maquina.objects.create(nombre="Equipo ajeno", empresa=other_company)
+        foreign_point = PuntoMuestreo.objects.create(maquina=foreign_machine, nombre="Punto ajeno")
+        self.token.cliente_empresa_id = str(self.empresa.pk)
+        self.token.save(update_fields=["cliente_empresa_id"])
+
+        workbook = generate_template_workbook(self.token)
+        catalog_sheet = workbook["_CATALOGOS"]
+        headers = {cell.value: cell.column for cell in catalog_sheet[1]}
+        machines = [value for value in catalog_sheet.iter_cols(
+            min_col=headers["Maquinas"], max_col=headers["Maquinas"], min_row=2, values_only=True
+        ).__next__() if value]
+        points = [value for value in catalog_sheet.iter_cols(
+            min_col=headers["PuntosMuestreo"], max_col=headers["PuntosMuestreo"], min_row=2, values_only=True
+        ).__next__() if value]
+
+        self.assertEqual(machines, [f"{own_machine.pk} | {own_machine.nombre}"])
+        self.assertEqual(points, [f"{own_point.pk} | {own_machine.nombre} | {own_point.nombre}"])
+        self.assertNotIn(str(foreign_machine.pk), " ".join(machines))
+        self.assertNotIn(str(foreign_point.pk), " ".join(points))
+
+    def test_preview_rejects_assets_outside_template_company(self):
+        other_company = Empresa.objects.create(nombre="Empresa ajena para previsualizacion")
+        foreign_machine = Maquina.objects.create(nombre="Equipo ajeno", empresa=other_company)
+        foreign_point = PuntoMuestreo.objects.create(maquina=foreign_machine, nombre="Punto ajeno")
+        workbook = generate_template_workbook(self.token)
+        ws = workbook["Aceites"]
+        columns = template_columns("aceite")
+        index = {key: position for position, (key, _) in enumerate(columns, start=1)}
+        ws.cell(2, index["fecha_toma"], timezone.now())
+        ws.cell(2, index["condicion"], "usada")
+        ws.cell(2, index["referencia_marca"], "Referencia de prueba")
+        ws.cell(2, index["punto_muestreo"], f"{foreign_point.pk} | {foreign_machine.nombre} | {foreign_point.nombre}")
+        ws.cell(2, index[f"tecnico_{self.field.id}"], f"{self.item.id} | SAE 70W-90")
+
+        _, errors = parse_row(
+            ws,
+            2,
+            "aceite",
+            technical_fields_by_type(),
+            empresa_id=self.empresa.pk,
+        )
+
+        self.assertTrue(any("Punto de medida inválido" in error["message"] for error in errors))
 
 
 class LoteMuestrasCreateSerializerTests(TestCase):
@@ -543,6 +760,9 @@ class LoteMuestrasCreateSerializerTests(TestCase):
                     "tipo_muestra": "aceite",
                     "condicion": "usada",
                     "referencia_equipo": None,
+                    # The web form deliberately sends null for a manually
+                    # identified sample; the serializer must accept it.
+                    "punto_muestreo": None,
                     "equipo_placa": "ewtdasds",
                     "periodo_servicio_aceite": 22,
                     "unidad_periodo_aceite": "horas",
@@ -562,6 +782,39 @@ class LoteMuestrasCreateSerializerTests(TestCase):
         serializer = LoteMuestrasCreateSerializer(data=payload)
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_manual_sampling_point_creates_tree_point_for_manual_machine(self):
+        payload = {
+            "tipo_cliente": "registrado",
+            "cliente_empresa": self.empresa.id,
+            "contacto_nombre": "Contacto manual",
+            "fecha_envio": "2026-10-18",
+            "estado": "registrado",
+            "usuario_registro": self.user.id,
+            "muestras": [{
+                "fecha_toma": "2026-10-18T10:00:00-05:00",
+                "tipo_muestra": "aceite",
+                "condicion": "usada",
+                "equipo_placa": "TALLER-MANUAL-01",
+                "punto_muestreo_manual": "Reductor lado motor",
+                "referencia_marca": "Shell Omala S4 GX 220",
+            }],
+        }
+
+        serializer = LoteMuestrasCreateSerializer(data=payload)
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        lote = serializer.save()
+        muestra = lote.muestras.get()
+        assignment = muestra.asignaciones_punto_muestreo.get(activa=True)
+
+        self.assertEqual(muestra.referencia_equipo.codigo_equipo, "TALLER-MANUAL-01")
+        self.assertEqual(assignment.punto_muestreo.nombre, "Reductor lado motor")
+        self.assertEqual(assignment.punto_muestreo.maquina_id, muestra.referencia_equipo_id)
+        root = Carpeta.objects.get(compania=self.empresa, typeFolder="root", id_parent_node="-1")
+        machine_node = Carpeta.objects.get(machine=muestra.referencia_equipo)
+        self.assertEqual(machine_node.id_parent_node, str(root.id))
+        self.assertTrue(machine_node.isMachine)
 
     def test_mixed_batch_ignores_legacy_oil_catalog_field_for_grease(self):
         catalog, item = self._catalog_item("Grado de viscosidad", "grado_viscosidad_mixto")

@@ -2448,9 +2448,31 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        def worksheet_max_row(worksheet):
+            """Return a reliable row count for official files saved by other XLSX writers.
+
+            Some valid XLSX writers omit the optional worksheet ``dimension`` XML
+            element. In read-only mode openpyxl then exposes ``max_row`` and
+            ``max_column`` as ``None`` until it scans the sheet. Do that scan
+            explicitly so a valid upload produces validation feedback instead of
+            an internal server error.
+            """
+            if worksheet.max_row is None or worksheet.max_column is None:
+                try:
+                    worksheet.calculate_dimension(force=True)
+                # openpyxl raises UnboundLocalError for a truly empty sheet
+                # whose optional dimension was omitted as well.
+                except (AttributeError, TypeError, UnboundLocalError, ValueError):
+                    return 0
+            try:
+                return int(worksheet.max_row or 0)
+            except (TypeError, ValueError):
+                return 0
+
         ignored_sheets = {"Metadata", "_LISTAS", "Instrucciones"}
         data_sheets = [ws for ws in wb.worksheets if ws.title not in ignored_sheets and ws.sheet_state == "visible"]
-        if len(wb.worksheets) > max_sheets or any(ws.max_row > max_rows + 1 for ws in data_sheets):
+        worksheet_rows = {ws.title: worksheet_max_row(ws) for ws in wb.worksheets}
+        if len(wb.worksheets) > max_sheets or any(worksheet_rows[ws.title] > max_rows + 1 for ws in data_sheets):
             return [], [], Response({"detail": "La plantilla excede el máximo de 20 hojas o 5.000 filas por hoja."}, status=status.HTTP_400_BAD_REQUEST)
         if not data_sheets:
             return [], [], Response(
@@ -2462,7 +2484,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         if "Metadata" in wb.sheetnames:
             metadata = {
                 str(wb["Metadata"].cell(row, 1).value): wb["Metadata"].cell(row, 2).value
-                for row in range(1, wb["Metadata"].max_row + 1)
+                for row in range(1, worksheet_rows["Metadata"] + 1)
             }
             metadata_token = metadata.get("token")
         if not metadata_token:
@@ -2490,7 +2512,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 continue
 
             index = {name: headers.index(name) + 1 for name in headers if name}
-            for row_number in range(2, ws.max_row + 1):
+            for row_number in range(2, worksheet_rows[ws.title] + 1):
                 prueba_muestra_id = ws.cell(row_number, index["PruebaMuestraID"]).value
                 field_key = ws.cell(row_number, index["CampoKey"]).value
                 value = ws.cell(row_number, index["Valor"]).value

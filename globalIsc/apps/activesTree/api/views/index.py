@@ -15,6 +15,7 @@ from apps.users.api.models.index import User
 
 from apps.activesTree.api.models.index import Carpeta, PuntoMuestreo, AsignacionPuntoMuestreo, Lubricante
 from apps.activesTree.api.models.machines.index import Maquina
+from apps.activesTree.services import ensure_machine_tree_node
 from apps.muestras.api.models.muestras.index import Muestra
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
 from apps.resultado.api.models.index import Resultado
@@ -141,6 +142,7 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         machine = serializer.save()
+        ensure_machine_tree_node(machine)
         record_operational_event(
             actor=self.request.user,
             action="maquina.creada",
