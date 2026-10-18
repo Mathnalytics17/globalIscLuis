@@ -1,11 +1,15 @@
 from rest_framework import serializers
+from datetime import timedelta
+
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.muestras.index import Muestra
 from apps.activesTree.api.models.machines.index import Maquina
 from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, PuntoMuestreo, Lubricante
+from apps.activesTree.services import ensure_machine_tree_node
 from apps.users.api.models.index import User
 from apps.muestras.api.serializers.muestras.index import MuestraListSerializer, MuestraSerializer
 from apps.misc.api.serializers.tipoGestionMuestra.index import TipoGestionMuestraSerializer
@@ -35,10 +39,147 @@ def _record_sample_created_from_lot(muestra, actor):
         },
     )
 
+
+def _add_business_days(start_date, days):
+    """Add working days (Monday-Friday) without changing the stored sample."""
+    current = start_date
+    remaining = max(0, int(days or 0))
+    while remaining:
+        current += timedelta(days=1)
+        if current.weekday() < 5:
+            remaining -= 1
+    return current
+
+
+def _business_days_remaining(today, due_date):
+    if due_date == today:
+        return 0
+    direction = 1 if due_date > today else -1
+    cursor = today
+    total = 0
+    while cursor != due_date:
+        cursor += timedelta(days=direction)
+        if cursor.weekday() < 5:
+            total += direction
+    return total
+
+
+class LoteMuestraWorkspaceSerializer(serializers.ModelSerializer):
+    """Lean sample projection used by the expandable batch workspace."""
+
+    equipo = serializers.SerializerMethodField()
+    punto_muestreo = serializers.SerializerMethodField()
+    estado_flujo = serializers.SerializerMethodField()
+    plazo_entrega = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Muestra
+        fields = [
+            "id",
+            "tipo_muestra",
+            "condicion",
+            "fecha_toma",
+            "estado_operativo",
+            "is_ingresado",
+            "is_resultado_ingresado",
+            "is_revisado",
+            "equipo",
+            "punto_muestreo",
+            "estado_flujo",
+            "plazo_entrega",
+        ]
+
+    def get_equipo(self, obj):
+        machine = obj.referencia_equipo
+        if machine:
+            return {
+                "id": machine.id,
+                "nombre": machine.nombre,
+                "codigo": machine.codigo_equipo,
+                "manual": False,
+                "label": machine.codigo_equipo or machine.nombre,
+            }
+        if obj.equipo_placa:
+            return {"id": None, "nombre": obj.equipo_placa, "codigo": None, "manual": True, "label": obj.equipo_placa}
+        return None
+
+    def get_punto_muestreo(self, obj):
+        assignments = obj.asignaciones_punto_muestreo.all()
+        current = next((item for item in assignments if item.activa), None)
+        if not current:
+            return None
+        return {"id": current.punto_muestreo_id, "nombre": current.punto_muestreo.nombre}
+
+    def get_estado_flujo(self, obj):
+        lote = obj.lote
+        if obj.estado_operativo != "activa":
+            return {"code": "invalidada", "label": "Invalidada"}
+        if lote and lote.estado == "reportado":
+            return {"code": "reportada", "label": "Reportada"}
+        if obj.is_revisado:
+            return {"code": "revisada", "label": "Revisada"}
+        if obj.is_resultado_ingresado:
+            return {"code": "resultados_completos", "label": "Resultados completos"}
+        if obj.is_ingresado:
+            return {"code": "en_laboratorio", "label": "En laboratorio"}
+        return {"code": "registrada", "label": "Registrada"}
+
+    def get_plazo_entrega(self, obj):
+        lote = obj.lote
+        management_type = getattr(lote, "tipo_gestion", None)
+        if not lote or not management_type:
+            return {"configured": False, "label": "Sin plazo configurado"}
+
+        business_days = int(management_type.dias_habiles or 0)
+        calendar_days = int(management_type.dias_calendario or 0)
+        if business_days <= 0 and calendar_days <= 0:
+            return {"configured": False, "label": "Sin plazo configurado"}
+
+        start_date = lote.fecha_recepcion or lote.fecha_envio or timezone.localdate()
+        uses_business_days = business_days > 0
+        total_days = business_days if uses_business_days else calendar_days
+        due_date = _add_business_days(start_date, total_days) if uses_business_days else start_date + timedelta(days=total_days)
+        today = timezone.localdate()
+        remaining = _business_days_remaining(today, due_date) if uses_business_days else (due_date - today).days
+        elapsed = total_days - remaining
+        progress = min(100, max(0, round((elapsed / total_days) * 100))) if total_days else 0
+
+        if lote.estado == "reportado":
+            status_code, label, progress = "entregada", "Informe reportado", 100
+        elif remaining < 0:
+            status_code, label = "vencida", f"Vencida hace {abs(remaining)} día(s)"
+        elif remaining == 0:
+            status_code, label = "vence_hoy", "Vence hoy"
+        else:
+            suffix = "hábil(es)" if uses_business_days else "calendario(s)"
+            status_code, label = "en_plazo", f"{remaining} día(s) {suffix} restantes"
+
+        return {
+            "configured": True,
+            "basis": "habiles" if uses_business_days else "calendario",
+            "total_days": total_days,
+            "start_date": start_date.isoformat(),
+            "due_date": due_date.isoformat(),
+            "remaining_days": remaining,
+            "progress_percent": progress,
+            "status": status_code,
+            "label": label,
+        }
+
 class MuestraLoteCreateSerializer(serializers.ModelSerializer):
     atributos_tecnicos = MuestraAtributoTecnicoSerializer(many=True, required=False)
+    punto_muestreo_manual = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, write_only=True, max_length=150
+    )
     punto_muestreo = serializers.PrimaryKeyRelatedField(
-        queryset=PuntoMuestreo.objects.filter(activo=True), required=False, write_only=True
+        # The reception form sends an explicit null when the operator uses a
+        # manual equipment identifier.  `required=False` only accepts an
+        # omitted key; `allow_null=True` lets validation decide whether a
+        # manual identifier is sufficient for a used sample.
+        queryset=PuntoMuestreo.objects.filter(activo=True),
+        required=False,
+        allow_null=True,
+        write_only=True,
     )
     lubricante_catalogo = serializers.PrimaryKeyRelatedField(
         queryset=Lubricante.objects.filter(activo=True), required=False, allow_null=True, write_only=True
@@ -56,6 +197,7 @@ class MuestraLoteCreateSerializer(serializers.ModelSerializer):
             "equipo_placa",
             "referencia_equipo",
             "punto_muestreo",
+            "punto_muestreo_manual",
             "lubricante_catalogo",
             "lubricante_nuevo",
             "periodo_servicio_aceite",
@@ -75,10 +217,15 @@ class MuestraLoteCreateSerializer(serializers.ModelSerializer):
 
         referencia_equipo = attrs.get("referencia_equipo")
         punto_muestreo = attrs.get("punto_muestreo")
+        punto_muestreo_manual = (attrs.get("punto_muestreo_manual") or "").strip()
         lubricante_catalogo = attrs.get("lubricante_catalogo")
         equipo_placa = attrs.get("equipo_placa")
 
         if punto_muestreo:
+            if punto_muestreo_manual:
+                raise serializers.ValidationError({
+                    "punto_muestreo_manual": "Use un punto registrado o uno manual, no ambos."
+                })
             if referencia_equipo and referencia_equipo.pk != punto_muestreo.maquina_id:
                 raise serializers.ValidationError({"punto_muestreo": "El punto no pertenece a la máquina indicada."})
             attrs["referencia_equipo"] = punto_muestreo.maquina
@@ -330,8 +477,41 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
                 nombre=placa,
                 codigo_equipo=placa,
             )
+        ensure_machine_tree_node(machine)
         muestra_data["referencia_equipo"] = machine
         return muestra_data
+
+    def _resolve_manual_sampling_point(self, muestra, point_name, actor):
+        """Create or reuse a point typed during reception for a manual asset.
+
+        A manual point becomes an ordinary active tree point once its manual
+        machine exists. This preserves the sample's trend and makes the asset
+        available for later maintenance in the Machines module.
+        """
+        point_name = str(point_name or "").strip()
+        if not point_name or not muestra.referencia_equipo_id:
+            return None
+        point, _ = PuntoMuestreo.objects.get_or_create(
+            maquina=muestra.referencia_equipo,
+            nombre=point_name,
+            activo=True,
+            defaults={
+                "descripcion": "Punto de medida creado desde el ingreso manual de muestras.",
+                "creado_por": actor,
+            },
+        )
+        return point
+
+    @staticmethod
+    def _assign_sampling_point(muestra, punto_muestreo, actor, origen="lote"):
+        if not punto_muestreo:
+            return
+        AsignacionPuntoMuestreo.objects.create(
+            muestra=muestra,
+            punto_muestreo=punto_muestreo,
+            origen=origen,
+            asignado_por=actor,
+        )
 
     def _resolve_lubricant(self, lote, muestra_data):
         """A new name from reception becomes reusable, without altering any point."""
@@ -370,6 +550,7 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
         for muestra_data in muestras_data:
             atributos_data = muestra_data.pop("atributos_tecnicos", None)
             punto_muestreo = muestra_data.pop("punto_muestreo", None)
+            punto_muestreo_manual = muestra_data.pop("punto_muestreo_manual", None)
             muestra_data.pop("fecha_envio", None)
             muestra_data.pop("contacto_cliente", None)
             muestra_data.pop("usuario_registro", None)
@@ -386,10 +567,10 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
             )
             if atributos_data is not None:
                 replace_sample_attributes(muestra, atributos_data)
-            if punto_muestreo:
-                AsignacionPuntoMuestreo.objects.create(
-                    muestra=muestra, punto_muestreo=punto_muestreo, origen='lote', asignado_por=lote.usuario_registro,
-                )
+            punto_muestreo = punto_muestreo or self._resolve_manual_sampling_point(
+                muestra, punto_muestreo_manual, lote.usuario_registro
+            )
+            self._assign_sampling_point(muestra, punto_muestreo, lote.usuario_registro)
             _record_sample_created_from_lot(muestra, lote.usuario_registro)
 
         lote.recalcular_estado()
@@ -430,26 +611,14 @@ class AddMuestrasToLoteSerializer(serializers.Serializer):
         for muestra_data in muestras_data:
             atributos_data = muestra_data.pop("atributos_tecnicos", None)
             punto_muestreo = muestra_data.pop("punto_muestreo", None)
+            punto_muestreo_manual = muestra_data.pop("punto_muestreo_manual", None)
             muestra_data.pop("fecha_envio", None)
             muestra_data.pop("contacto_cliente", None)
             muestra_data.pop("usuario_registro", None)
             muestra_data.pop("lote", None)
-            muestra_data = LoteMuestrasCreateSerializer()._resolve_lubricant(lote, muestra_data)
-            if not muestra_data.get("referencia_equipo") and muestra_data.get("equipo_placa") and lote.cliente_empresa_id:
-                placa = str(muestra_data.get("equipo_placa") or "").strip()
-                machine = (
-                    Maquina.objects
-                    .filter(empresa=lote.cliente_empresa)
-                    .filter(Q(codigo_equipo__iexact=placa) | Q(nombre__iexact=placa) | Q(numero_serie__iexact=placa))
-                    .first()
-                )
-                if not machine:
-                    machine = Maquina.objects.create(
-                        empresa=lote.cliente_empresa,
-                        nombre=placa,
-                        codigo_equipo=placa,
-                    )
-                muestra_data["referencia_equipo"] = machine
+            resolver = LoteMuestrasCreateSerializer()
+            muestra_data = resolver._resolve_manual_machine(lote, muestra_data)
+            muestra_data = resolver._resolve_lubricant(lote, muestra_data)
 
             muestra = Muestra.objects.create(
                 lote=lote,
@@ -460,11 +629,11 @@ class AddMuestrasToLoteSerializer(serializers.Serializer):
             )
             if atributos_data is not None:
                 replace_sample_attributes(muestra, atributos_data)
-            if punto_muestreo:
-                AsignacionPuntoMuestreo.objects.create(
-                    muestra=muestra, punto_muestreo=punto_muestreo, origen='lote',
-                    asignado_por=request.user if request and request.user.is_authenticated else lote.usuario_registro,
-                )
+            actor = request.user if request and request.user.is_authenticated else lote.usuario_registro
+            punto_muestreo = punto_muestreo or LoteMuestrasCreateSerializer()._resolve_manual_sampling_point(
+                muestra, punto_muestreo_manual, actor
+            )
+            LoteMuestrasCreateSerializer._assign_sampling_point(muestra, punto_muestreo, actor)
 
             _record_sample_created_from_lot(
                 muestra,

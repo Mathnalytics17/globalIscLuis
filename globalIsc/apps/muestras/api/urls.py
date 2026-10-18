@@ -28,7 +28,9 @@ urlpatterns = [
     path("lubrication/import-runs/", CorridaImportacionViewSet.as_view({"get": "list"}), name="import-runs-list"),
     path("lubrication/import-runs/<int:pk>/", CorridaImportacionViewSet.as_view({"get": "retrieve"}), name="import-runs-detail"),
     path("lubrication/sample-batches/<str:pk>/recalcular-estado/", LoteMuestrasViewSet.as_view({"post": "recalcular_estado"}), name="sample-batches-recalculate-status"),
-    path("lubrication/sample-batches/<str:pk>/samples/", LoteMuestrasViewSet.as_view({"post": "add_samples"}), name="sample-batches-add-samples"),
+    # The nested resource serves both the paginated sample workspace (GET)
+    # and the established append-samples operation (POST).
+    path("lubrication/sample-batches/<str:pk>/samples/", LoteMuestrasViewSet.as_view({"get": "samples", "post": "samples"}), name="sample-batches-samples"),
     path("lubrication/sample-batches/<str:pk>/cancel/", LoteMuestrasViewSet.as_view({"post": "cancel"}), name="sample-batches-cancel"),
     path("lubrication/sample-batches/<str:pk>/reopen/", LoteMuestrasViewSet.as_view({"post": "reopen"}), name="sample-batches-reopen"),
     path("lubrication/sample-batches/<str:pk>/timeline/", LoteMuestrasViewSet.as_view({"get": "timeline"}), name="sample-batches-timeline"),

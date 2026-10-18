@@ -18,13 +18,14 @@ from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPer
 
 from apps.activesTree.api.models.machines.index import Maquina
 from apps.activesTree.api.models.index import PuntoMuestreo
+from apps.misc.api.models.companies.index import Empresa
 from apps.misc.api.models.dynamicTechnicalConfig.index import CampoTecnicoMuestra
 from apps.muestras.api.models.sampleBatchExcel.index import SampleBatchExcelTemplateToken
 from apps.muestras.api.models.importaciones import CorridaImportacion
 from apps.muestras.services.operational_audit import record_operational_event
 from apps.users.api.models.index import User
 
-SCHEMA_VERSION = "sample-batch-v5-sampling-points"
+SCHEMA_VERSION = "sample-batch-v6-manual-sampling-points"
 TEMPLATE_ROWS = 500
 MAX_IMPORT_ROWS = 5000
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
@@ -41,6 +42,7 @@ COMMON_HEADERS = [
     ("referencia_marca", "Referencia / marca"),
     ("referencia_equipo", "Máquina"),
     ("punto_muestreo", "Punto de medida"),
+    ("punto_muestreo_manual", "Punto de medida manual"),
     ("equipo_placa", "Placa manual"),
     ("periodo_servicio_aceite", "Periodo aceite"),
     ("unidad_periodo_aceite", "Unidad aceite"),
@@ -125,14 +127,29 @@ def add_list_validation(ws, cells, formula):
     validation.add(cells)
 
 
-def write_catalog_sheet(workbook, fields_by_type):
+def write_catalog_sheet(workbook, fields_by_type, empresa_id=None):
+    """Write only the assets available to the company selected for this template.
+
+    A template without a registered company represents an occasional client, so
+    it deliberately has no registered assets.  Showing every company's assets
+    here made it possible to select an unrelated machine in an Excel file.
+    """
     ws = workbook.create_sheet("_CATALOGOS")
     ws.sheet_state = "veryHidden"
+    machines = Maquina.objects.none()
+    sampling_points = PuntoMuestreo.objects.none()
+    if empresa_id:
+        machines = Maquina.objects.filter(empresa_id=empresa_id).order_by("id")
+        sampling_points = (
+            PuntoMuestreo.objects.filter(activo=True, maquina__empresa_id=empresa_id)
+            .select_related("maquina")
+            .order_by("maquina__nombre", "nombre")
+        )
     columns = [
         ("Condiciones", ["usada", "nueva"]),
         ("Unidades", ["horas", "km", "millas", "dias"]),
-        ("Maquinas", [machine_label(item) for item in Maquina.objects.all().order_by("id")[:3000]]),
-        ("PuntosMuestreo", [f"{item.pk} | {item.maquina.nombre} | {item.nombre}" for item in PuntoMuestreo.objects.filter(activo=True).select_related('maquina').order_by('maquina__nombre', 'nombre')[:3000]]),
+        ("Maquinas", [machine_label(item) for item in machines[:3000]]),
+        ("PuntosMuestreo", [f"{item.pk} | {item.maquina.nombre} | {item.nombre}" for item in sampling_points[:3000]]),
     ]
 
     seen_fields = set()
@@ -211,11 +228,17 @@ def generate_template_workbook(token):
     readme["A1"].font = Font(bold=True, size=15)
     readme["A3"] = "Use la hoja Aceites para muestras de aceite y la hoja Grasas para muestras de grasa."
     readme["A4"] = "Las columnas técnicas reflejan la configuración vigente de Campos técnicos de muestra."
-    readme["A5"] = "Si el cliente no conoce un dato y el campo lo permite, seleccione DESCONOCIDO."
-    readme["A6"] = "Para una muestra usada seleccione el Punto de medida. La máquina se completa automáticamente; use placa manual solo si el equipo no está registrado."
+    readme["A5"] = "Si el cliente no conoce un dato técnico, seleccione DESCONOCIDO."
+    has_company_context = bool(token.cliente_empresa_id)
+    readme["A6"] = (
+        "Para una muestra usada seleccione el Punto de medida de la empresa elegida. "
+        "La máquina se completa automáticamente. Para activos no registrados use Placa manual y Punto de medida manual."
+        if has_company_context
+        else "Este archivo no tiene una empresa registrada asociada. Para una muestra usada use Placa manual y Punto de medida manual; no se listan activos registrados."
+    )
     readme.column_dimensions["A"].width = 130
 
-    ranges = write_catalog_sheet(workbook, fields_by_type)
+    ranges = write_catalog_sheet(workbook, fields_by_type, empresa_id=token.cliente_empresa_id)
 
     sheets_meta = []
     for sample_type, sheet_name in [("aceite", OIL_SHEET), ("grasa", GREASE_SHEET)]:
@@ -264,7 +287,7 @@ def validate_uploaded_workbook_file(uploaded):
     return None
 
 
-def parse_row(ws, row, sample_type, fields_by_type):
+def parse_row(ws, row, sample_type, fields_by_type, empresa_id=None):
     columns = template_columns(sample_type, fields_by_type)
     raw = {key: ws.cell(row=row, column=index).value for index, (key, _) in enumerate(columns, start=1)}
     errors = []
@@ -283,13 +306,16 @@ def parse_row(ws, row, sample_type, fields_by_type):
         "fabricante": str(raw["fabricante"] or "").strip(),
         "referencia_marca": str(raw["referencia_marca"] or "").strip(),
         "equipo_placa": str(raw["equipo_placa"] or "").strip(),
+        "punto_muestreo_manual": str(raw["punto_muestreo_manual"] or "").strip(),
         "periodo_servicio_aceite": as_float(raw["periodo_servicio_aceite"]),
         "unidad_periodo_aceite": normalize_choice(raw["unidad_periodo_aceite"]) or "horas",
         "periodo_servicio_equipo": as_float(raw["periodo_servicio_equipo"]),
         "unidad_periodo_equipo": normalize_choice(raw["unidad_periodo_equipo"]) or "horas",
         "observaciones": str(raw["observaciones"] or "").strip(),
         "referencia_equipo": None,
+        "referencia_equipo_nombre": "",
         "punto_muestreo": None,
+        "punto_muestreo_nombre": "",
         "campos_adicionales": {"fabricante": str(raw["fabricante"] or "").strip() or None},
         "atributos_tecnicos": {},
     }
@@ -300,12 +326,19 @@ def parse_row(ws, row, sample_type, fields_by_type):
         add_error("Referencia / marca es obligatoria.", "Referencia / marca")
 
     point_id = parse_id(raw["punto_muestreo"])
-    point = PuntoMuestreo.objects.filter(pk=point_id, activo=True).select_related('maquina').first() if point_id and point_id != UNKNOWN_LABEL else None
+    point_queryset = PuntoMuestreo.objects.filter(pk=point_id, activo=True).select_related("maquina")
+    machine_queryset = Maquina.objects.all()
+    if empresa_id:
+        point_queryset = point_queryset.filter(maquina__empresa_id=empresa_id)
+        machine_queryset = machine_queryset.filter(empresa_id=empresa_id)
+    point = point_queryset.first() if point_id and point_id != UNKNOWN_LABEL else None
     if point_id and not point:
         add_error(f"Punto de medida inválido ({point_id}).", "Punto de medida")
     if point:
         data["punto_muestreo"] = str(point.pk)
+        data["punto_muestreo_nombre"] = point.nombre
         data["referencia_equipo"] = str(point.maquina_id)
+        data["referencia_equipo_nombre"] = point.maquina.nombre
     machine = parse_id(raw["referencia_equipo"])
     if point and machine and str(machine) != str(point.maquina_id):
         add_error("La máquina no corresponde al punto de medida seleccionado.", "Máquina", "Punto de medida")
@@ -314,9 +347,21 @@ def parse_row(ws, row, sample_type, fields_by_type):
             "Hay datos en Punto de medida y Placa manual. Deje solo la columna que identifica esta muestra.",
             "Punto de medida", "Placa manual",
         )
+    if point and data["punto_muestreo_manual"]:
+        add_error(
+            "Hay datos en Punto de medida y Punto de medida manual. Deje solo una forma de identificar el punto.",
+            "Punto de medida", "Punto de medida manual",
+        )
+    if data["punto_muestreo_manual"] and not data["equipo_placa"]:
+        add_error(
+            "Punto de medida manual requiere una Placa manual para crear o identificar el equipo.",
+            "Punto de medida manual", "Placa manual",
+        )
     if machine and not point:
-        if Maquina.objects.filter(pk=machine).exists():
-            data["referencia_equipo"] = str(machine)
+        machine_instance = machine_queryset.filter(pk=machine).only("id", "nombre").first()
+        if machine_instance:
+            data["referencia_equipo"] = str(machine_instance.pk)
+            data["referencia_equipo_nombre"] = machine_instance.nombre
         else:
             add_error(f"Máquina inválida ({machine}).", "Máquina")
     if condition == "usada" and not data["punto_muestreo"] and not data["equipo_placa"]:
@@ -331,19 +376,20 @@ def parse_row(ws, row, sample_type, fields_by_type):
         unknown = item_id == UNKNOWN_LABEL
 
         active_items = catalog.items.filter(activo=True, deleted_at__isnull=True)
-        allows_unknown = field.permite_desconocido and catalog.permite_desconocido
-        if not active_items.exists() and allows_unknown and not item_id:
+        if not active_items.exists() and not item_id:
             unknown = True
 
         item = None if unknown else active_items.filter(pk=item_id).first()
         if item_id and not unknown and not item:
             add_error(f"{label}: opción inválida ({item_id}).", label)
-        if unknown and not allows_unknown:
-            add_error(f"{label}: el campo no permite DESCONOCIDO.", label)
         if field.obligatorio and not item and not unknown:
             add_error(f"{label}: seleccione una opción.", label)
 
-        data["atributos_tecnicos"][str(catalog.id)] = {
+        # Attributes are identified by the configured sample field, not only
+        # by its source catalog. Several fields may intentionally reuse the
+        # same catalog (for example "Campo grasa" and "Grado de viscosidad").
+        # Keying by catalog silently overwrote the earlier Excel column.
+        data["atributos_tecnicos"][str(field.id)] = {
             "item": str(item.id) if item else "",
             "desconocido": unknown,
             "campo_tecnico_muestra": str(field.id),
@@ -365,12 +411,17 @@ class SampleBatchExcelImportViewSet(ActionPermissionMixin, viewsets.ViewSet):
     @action(detail=False, methods=["get"], url_path="template")
     def template(self, request):
         cliente_empresa = request.query_params.get("cliente_empresa") or None
+        empresa = None
+        if cliente_empresa:
+            empresa = Empresa.objects.filter(pk=cliente_empresa).first()
+            if not empresa:
+                return Response({"detail": "La empresa seleccionada no existe."}, status=status.HTTP_400_BAD_REQUEST)
         if cliente_empresa and not (request.user.is_superuser or request.user.role == User.Role.GLOBAL):
             if str(cliente_empresa) != str(request.user.empresa_id):
                 return Response({"detail": "No puede generar plantilla para otra empresa."}, status=status.HTTP_403_FORBIDDEN)
         token = SampleBatchExcelTemplateToken.objects.create(
             requested_by=request.user,
-            cliente_empresa_id=cliente_empresa,
+            cliente_empresa_id=str(empresa.pk) if empresa else None,
             schema_version=SCHEMA_VERSION,
             expires_at=timezone.now() + timedelta(hours=8),
         )
@@ -432,7 +483,13 @@ class SampleBatchExcelImportViewSet(ActionPermissionMixin, viewsets.ViewSet):
                     break
                 if row_is_empty(ws, row, len(headers)):
                     continue
-                data, errors = parse_row(ws, row, sample_type, fields_by_type)
+                data, errors = parse_row(
+                    ws,
+                    row,
+                    sample_type,
+                    fields_by_type,
+                    empresa_id=token.cliente_empresa_id,
+                )
                 rows.append({"sheet": sheet_name, "row_number": row, "is_valid": not errors, "errors": errors, "data": data})
             if len(rows) >= MAX_IMPORT_ROWS:
                 break
@@ -440,8 +497,9 @@ class SampleBatchExcelImportViewSet(ActionPermissionMixin, viewsets.ViewSet):
         valid_rows = sum(1 for row in rows if row["is_valid"])
         error_rows = sum(1 for row in rows if not row["is_valid"])
         total_errors = sum(len(row["errors"]) for row in rows)
+        empresa = Empresa.objects.filter(pk=token.cliente_empresa_id).first() if token.cliente_empresa_id else None
         run = CorridaImportacion.objects.create(
-            empresa_id=token.cliente_empresa_id,
+            empresa=empresa,
             actor=request.user,
             tipo="lote_muestras_excel",
             estado=CorridaImportacion.Estado.VALIDADA if not error_rows and not truncated else CorridaImportacion.Estado.FALLIDA,
@@ -454,7 +512,7 @@ class SampleBatchExcelImportViewSet(ActionPermissionMixin, viewsets.ViewSet):
             detalle_errores=[{"hoja": row["sheet"], "fila": row["row_number"], "errores": row["errors"]} for row in rows if row["errors"]][:200],
             metadata={"schema_version": SCHEMA_VERSION, "template_token": str(token.token), "truncated": truncated, "valid_rows": valid_rows},
         )
-        record_operational_event(actor=request.user, empresa=token.cliente_empresa, action="importacion.previsualizada", entity_type="importacion", entity_id=run.id, entity_label=uploaded.name, detail="Archivo Excel validado para importación.", after={"total_filas": len(rows), "validas": valid_rows, "errores": total_errors, "estado": run.estado}, origin="importacion")
+        record_operational_event(actor=request.user, empresa=empresa, action="importacion.previsualizada", entity_type="importacion", entity_id=run.id, entity_label=uploaded.name, detail="Archivo Excel validado para importación.", after={"total_filas": len(rows), "validas": valid_rows, "errores": total_errors, "estado": run.estado}, origin="importacion")
         return Response({
             "import_run_id": run.id,
             "template_token": str(token.token),
