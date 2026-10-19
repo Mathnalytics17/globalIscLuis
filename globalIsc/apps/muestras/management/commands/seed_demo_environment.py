@@ -11,10 +11,12 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.activesTree.api.models.index import Lubricante, PuntoMuestreo
+from apps.activesTree.services import ensure_machine_tree_node
 from apps.activesTree.api.models.machines.index import Maquina
 from apps.misc.api.models.companies.index import Empresa
 from apps.misc.api.models.dynamicTechnicalConfig.index import (
     EscalaComparacion, EscalaComparacionItem, PruebaFuenteLimite, PruebaLimiteCampo,
+    normalize_scale_token,
 )
 from apps.misc.api.models.pruebas.index import Prueba
 from apps.misc.api.models.technicalCatalogs.index import Unidad
@@ -34,14 +36,32 @@ ASSETS = {
         ("MIN-DRG-01", "Draga de producción 01", "Reductor transmisión principal", "MAXGEAR ISO 320"),
         ("MIN-DRG-02", "Draga de producción 02", "Sistema hidráulico de cucharas", "MAXFLUID ISO 68"),
         ("MIN-CHN-01", "Chancadora primaria", "Reductor principal", "MAXGEAR ISO 460"),
+        ("MIN-MOL-01", "Molino de bolas 01", "Corona y piñón", "MAXGEAR ISO 680"),
+        ("MIN-PMP-01", "Bomba de relaves 01", "Rodamiento lado acople", "MAXGREASE EP 2"),
     ),
     "Taller Demo": (
         ("TAL-CAM-01", "Camión de servicio 01", "Motor diésel", "MAXMOTOR 15W-40"),
         ("TAL-CAM-02", "Camión de servicio 02", "Diferencial trasero", "MAXGEAR 85W-140"),
+        ("TAL-GEN-01", "Generador móvil 01", "Motor diésel", "MAXMOTOR 15W-40"),
     ),
     "Global Oil": (
         ("GO-LAB-01", "Banco demostrativo laboratorio", "Circuito hidráulico", "MAXFLUID ISO 46"),
+        ("GO-COMP-01", "Compresor de aire 01", "Cárter del compresor", "MAXCOMP ISO 68"),
     ),
+}
+
+
+EXTRA_POINTS = {
+    "MIN-DRG-01": ("Malacate de proa", "Sistema hidráulico principal"),
+    "MIN-DRG-02": ("Reductor de giro", "Malacate de popa"),
+    "MIN-CHN-01": ("Sistema hidráulico de ajuste",),
+    "MIN-MOL-01": ("Chumacera lado alimentación", "Chumacera lado descarga"),
+    "MIN-PMP-01": ("Rodamiento lado impulsor",),
+    "TAL-CAM-01": ("Diferencial trasero", "Caja de cambios"),
+    "TAL-CAM-02": ("Caja de transferencia",),
+    "TAL-GEN-01": ("Sistema hidráulico auxiliar",),
+    "GO-LAB-01": ("Bomba de circulación",),
+    "GO-COMP-01": ("Caja de engranajes",),
 }
 
 
@@ -68,7 +88,7 @@ class Command(BaseCommand):
 
         scale, _ = EscalaComparacion.objects.update_or_create(codigo="semaforo_demo", defaults={"nombre": "Semáforo de condición", "descripcion": "Escala demostrativa para la evaluación visual."})
         for order, label in enumerate(("Normal", "Alerta", "Crítico"), 1):
-            EscalaComparacionItem.objects.update_or_create(escala=scale, valor_normalizado=label.lower(), defaults={"etiqueta": label, "orden": order, "numero_base": order, "activo": True, "deleted_at": None})
+            EscalaComparacionItem.objects.update_or_create(escala=scale, valor_normalizado=normalize_scale_token(label), defaults={"etiqueta": label, "orden": order, "numero_base": order, "activo": True, "deleted_at": None})
 
         tests = {}
         for code, name, unit, operator, limit in TESTS:
@@ -85,8 +105,23 @@ class Command(BaseCommand):
                 maker, reference = oil.split(" ", 1)
                 lubricant, _ = Lubricante.objects.update_or_create(fabricante=maker, referencia=reference, defaults={"nombre": oil, "activo": True})
                 machine, _ = Maquina.objects.update_or_create(empresa=company, codigo_equipo=code, defaults={"nombre": machine_name, "descripcion": "Activo sintético de demostración.", "tipoAceite": oil, "frecuenciaCambio": "2000 horas", "frecuenciaAnalisis": "250 horas", "activo": True})
-                PuntoMuestreo.objects.update_or_create(maquina=machine, nombre=point_name, defaults={"codigo": f"{code}-PM", "descripcion": "Punto sintético de demostración.", "lubricante": oil, "lubricante_catalogo": lubricant, "frecuencia_cambio": 2000, "frecuencia_analisis": 250, "activo": True})
+                ensure_machine_tree_node(machine)
+                for point_index, current_point_name in enumerate((point_name, *EXTRA_POINTS.get(code, ())), start=1):
+                    PuntoMuestreo.objects.update_or_create(
+                        maquina=machine,
+                        nombre=current_point_name,
+                        defaults={
+                            "codigo": f"{code}-PM-{point_index:02d}",
+                            "descripcion": "Punto sintético de demostración.",
+                            "lubricante": oil,
+                            "lubricante_catalogo": lubricant,
+                            "frecuencia_cambio": 2000,
+                            "frecuencia_analisis": 250,
+                            "activo": True,
+                        },
+                    )
 
         minera = Empresa.objects.get(nombre="Empresa Minera Demo")
         call_command("seed_trend_demo", company=str(minera.pk), months=max(2, min(options["months"], 12)))
-        self.stdout.write(self.style.SUCCESS("Entorno demo listo: 8 cuentas, 3 empresas, catálogo, límites, escalas, activos y tendencias."))
+        call_command("seed_operational_showcase")
+        self.stdout.write(self.style.SUCCESS("Entorno demo listo: 8 cuentas, 3 empresas, catálogo, límites, activos, tendencias e inventario operativo."))

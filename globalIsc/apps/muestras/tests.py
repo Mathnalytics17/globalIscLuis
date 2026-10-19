@@ -42,6 +42,7 @@ from apps.muestras.api.views.sampleBatchExcel.index import (
     technical_fields_by_type,
     template_columns,
 )
+from apps.dashboard.api.services.operational_center import due_info_for_batch
 from apps.misc.api.views.dynamicTechnicalConfig.index import _build_limit_fields_from_prueba
 from apps.users.api.models.index import (
     SecurityPermission,
@@ -114,6 +115,27 @@ class LoteMuestraWorkspaceSerializerTests(TestCase):
         self.assertTrue(data["plazo_entrega"]["configured"])
         self.assertEqual(data["plazo_entrega"]["basis"], "habiles")
         self.assertEqual(data["plazo_entrega"]["total_days"], 3)
+
+    def test_deadline_starts_only_after_laboratory_reception(self):
+        self.lote.fecha_recepcion = None
+        self.lote.save(update_fields=["fecha_recepcion"])
+        sample = Muestra.objects.create(
+            lote=self.lote,
+            fecha_toma=timezone.now(),
+            tipo_muestra="aceite",
+            condicion="usada",
+            usuario_registro=self.user,
+        )
+
+        workspace_deadline = LoteMuestraWorkspaceSerializer(sample).data["plazo_entrega"]
+        dashboard_deadline = due_info_for_batch(self.lote, today=timezone.localdate())
+
+        self.assertTrue(workspace_deadline["configured"])
+        self.assertTrue(workspace_deadline["waiting_reception"])
+        self.assertIsNone(workspace_deadline["due_date"])
+        self.assertEqual(workspace_deadline["label"], "SLA inicia al recibir en laboratorio")
+        self.assertEqual(dashboard_deadline["urgency"], "pendiente_recepcion")
+        self.assertIsNone(dashboard_deadline["due_date"])
 
 
 class SampleIdentifierTests(TestCase):

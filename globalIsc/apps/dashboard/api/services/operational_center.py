@@ -60,10 +60,8 @@ def scoped_batches_for_user(user):
 
 
 def _base_date(batch):
-    value = batch.fecha_recepcion or batch.fecha_envio
-    if value:
-        return value
-    return timezone.localtime(batch.fecha_registro).date()
+    """The service commitment starts when the laboratory receives the lot."""
+    return batch.fecha_recepcion
 
 
 def _add_business_days(start, days):
@@ -92,10 +90,9 @@ def _business_days_between(start, end):
 def due_info_for_batch(batch, today=None):
     today = today or timezone.localdate()
     management = batch.tipo_gestion
-    base = _base_date(batch)
-    if not base or not management:
+    if not management:
         return {
-            "base_date": base,
+            "base_date": None,
             "due_date": None,
             "days_remaining": None,
             "day_mode": "sin_sla",
@@ -106,6 +103,17 @@ def due_info_for_batch(batch, today=None):
 
     business_days = int(getattr(management, "dias_habiles", 0) or 0)
     calendar_days = int(getattr(management, "dias_calendario", 0) or 0)
+    base = _base_date(batch)
+    if not base and (business_days > 0 or calendar_days > 0):
+        return {
+            "base_date": None,
+            "due_date": None,
+            "days_remaining": None,
+            "day_mode": "pendiente_recepcion",
+            "sla_days": business_days or calendar_days,
+            "urgency": "pendiente_recepcion",
+            "label": "SLA inicia al recibir en laboratorio",
+        }
 
     if business_days > 0:
         due_date = _add_business_days(base, business_days)
