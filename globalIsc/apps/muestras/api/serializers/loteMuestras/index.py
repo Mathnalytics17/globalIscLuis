@@ -135,9 +135,23 @@ class LoteMuestraWorkspaceSerializer(serializers.ModelSerializer):
         if business_days <= 0 and calendar_days <= 0:
             return {"configured": False, "label": "Sin plazo configurado"}
 
-        start_date = lote.fecha_recepcion or lote.fecha_envio or timezone.localdate()
         uses_business_days = business_days > 0
         total_days = business_days if uses_business_days else calendar_days
+        start_date = lote.fecha_recepcion
+        if not start_date:
+            return {
+                "configured": True,
+                "waiting_reception": True,
+                "basis": "habiles" if uses_business_days else "calendario",
+                "total_days": total_days,
+                "start_date": None,
+                "due_date": None,
+                "remaining_days": None,
+                "progress_percent": 0,
+                "status": "pendiente_recepcion",
+                "label": "SLA inicia al recibir en laboratorio",
+            }
+
         due_date = _add_business_days(start_date, total_days) if uses_business_days else start_date + timedelta(days=total_days)
         today = timezone.localdate()
         remaining = _business_days_remaining(today, due_date) if uses_business_days else (due_date - today).days
