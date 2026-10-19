@@ -84,6 +84,26 @@ class FolderViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             )
         return super().destroy(request, *args, **kwargs)
 
+    def update(self, request, *args, **kwargs):
+        """The company root is a projection of Empresa.nombre, never a folder.
+
+        Keeping this rule on the API (rather than only hiding an action in the
+        UI) prevents a stale client or direct request from splitting the name
+        shown in the asset tree from the actual company name.
+        """
+        folder = self.get_object()
+        if folder.typeFolder == 'root' or str(folder.id_parent_node) == '-1':
+            return Response(
+                {
+                    'detail': (
+                        'El nodo raíz representa a la empresa y no se puede editar como carpeta. '
+                        'Cambie el nombre desde los datos de la empresa.'
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        return super().update(request, *args, **kwargs)
+
 
 class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     pagination_class = StandardResultsSetPagination

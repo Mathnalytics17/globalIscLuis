@@ -92,6 +92,26 @@ class EmpresaViewSet(viewsets.ModelViewSet):
         self._require_company_permission("empresas.editar")
         return super().partial_update(request, *args, **kwargs)
 
+    def perform_update(self, serializer):
+        """Keep the asset-tree root as a faithful label for its company."""
+        previous_name = serializer.instance.nombre
+        with transaction.atomic():
+            empresa = serializer.save()
+            if empresa.nombre != previous_name:
+                # Import locally so company management does not create an app
+                # import cycle during Django startup.
+                from apps.activesTree.services import ensure_company_root
+
+                ensure_company_root(empresa)
+
+        if empresa.nombre != previous_name:
+            audit_user_action(
+                self.request,
+                "companies.rename",
+                empresa=empresa,
+                detail=f"Empresa renombrada: {previous_name} → {empresa.nombre}",
+            )
+
     def destroy(self, request, *args, **kwargs):
         self._require_company_permission("empresas.eliminar")
         empresa = self.get_object()

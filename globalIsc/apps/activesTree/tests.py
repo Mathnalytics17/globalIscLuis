@@ -41,6 +41,42 @@ class SamplingPointApiTests(APITestCase):
             compania=self.company, typeFolder='root', id_parent_node='-1',
         ).exists())
 
+    def test_company_rename_updates_its_root_label(self):
+        response = self.client.patch(
+            f'/api/companies/{self.company.id}/',
+            {'nombre': 'Mineros Aluvial S.A.S.'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        root = Carpeta.objects.get(compania=self.company, typeFolder='root', id_parent_node='-1')
+        self.assertEqual(root.nombre, 'Mineros Aluvial S.A.S.')
+
+    def test_company_root_cannot_be_renamed_as_a_folder(self):
+        root = Carpeta.objects.get(compania=self.company, typeFolder='root', id_parent_node='-1')
+
+        response = self.client.patch(
+            f'/api/folders/{root.id}/',
+            {'nombre': 'Nombre incorrecto'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        root.refresh_from_db()
+        self.assertEqual(root.nombre, self.company.nombre)
+
+    def test_tree_always_exposes_company_name_for_legacy_root(self):
+        root = Carpeta.objects.get(compania=self.company, typeFolder='root', id_parent_node='-1')
+        # Simulates roots that were renamed through the legacy UI.
+        Carpeta.objects.filter(pk=root.pk).update(nombre='Etiqueta antigua')
+
+        response = self.client.get('/api/actives-tree/basic-structure/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['structure'][0]['nombre'], self.company.nombre)
+        root.refresh_from_db()
+        self.assertEqual(root.nombre, self.company.nombre)
+
     def test_global_lubricant_can_be_used_by_a_point_from_any_company(self):
         created = self.client.post('/api/lubricants/', {
             'fabricante': 'Petrobras', 'referencia': 'Hydra 68',

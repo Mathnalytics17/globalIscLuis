@@ -11,7 +11,7 @@ class CorridaImportacionViewSet(ActionPermissionMixin, viewsets.ReadOnlyModelVie
     serializer_class = CorridaImportacionSerializer
     pagination_class = StandardResultsSetPagination
     permission_classes = [IsAuthenticated, DenyReadOnlyWrite, HasSecurityPermission]
-    permission_action_map = {"list": "dashboard.ver_empresa", "retrieve": "dashboard.ver_empresa"}
+    permission_action_map = {"list": "importaciones.ver", "retrieve": "importaciones.ver"}
 
     def get_queryset(self):
         queryset = CorridaImportacion.objects.select_related("empresa", "actor")

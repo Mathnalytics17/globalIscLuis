@@ -119,6 +119,10 @@ DEFAULT_PERMISSION_MATRIX = [
     ("reportes", "restaurar_version", "reportes.restaurar_version", "Restaurar version"),
     ("reportes", "subir_firma", "reportes.subir_firma", "Subir firma"),
     ("reportes", "ver_dashboard", "reportes.ver_dashboard", "Ver dashboard de reportes"),
+    ("reportes", "aprobar", "reportes.aprobar", "Aprobar reportes"),
+    ("reportes", "anular", "reportes.anular", "Anular reportes"),
+    ("trazabilidad", "ver", "trazabilidad.ver", "Consultar trazabilidad operacional"),
+    ("importaciones", "ver", "importaciones.ver", "Consultar corridas de importación"),
     ("config_tecnica", "ver", "config_tecnica.ver", "Ver configuracion tecnica"),
     ("config_tecnica", "editar", "config_tecnica.editar", "Editar configuracion tecnica"),
     ("catalogos_tecnicos", "ver", "catalogos_tecnicos.ver", "Ver catalogos tecnicos"),
@@ -164,9 +168,6 @@ DEFAULT_PERMISSION_MATRIX = [
     ("campos_extra", "clonar", "campos_extra.clonar", "Clonar campos extra"),
     ("campos_extra", "cambiar_estado", "campos_extra.cambiar_estado", "Cambiar estado de campos extra"),
     ("dashboard", "ver_global", "dashboard.ver_global", "Ver dashboard global"),
-    ("dashboard", "ver_empresa", "dashboard.ver_empresa", "Ver dashboard de empresa"),
-    ("dashboard", "ver_laboratorio", "dashboard.ver_laboratorio", "Ver dashboard de laboratorio"),
-    ("dashboard", "ver_reportes", "dashboard.ver_reportes", "Ver dashboard de reportes"),
 ]
 
 ROLE_DEFINITIONS = [
@@ -179,6 +180,16 @@ ROLE_DEFINITIONS = [
     ("Solo Lectura", "solo_lectura", SecurityRole.Scope.COMPANY, User.Role.EMPRESA),
 ]
 
+DEFAULT_ROLE_HOME_PATHS = {
+    "admin_global": "/dashboard",
+    "admin_empresa": "/muestras/lotes",
+    "empresa_consulta": "/reportes",
+    "solo_lectura": "/reportes",
+    "empresa_carga_muestras": "/muestras/nuevo-lote",
+    "laboratorista": "/muestras/laboratorio",
+    "revisor_interpretador": "/muestras/revision-resultados",
+}
+
 
 READONLY_PREFIXES = [
     "activos.ver",
@@ -190,7 +201,8 @@ READONLY_PREFIXES = [
     "reportes.descargar_pdf",
     "reportes.ver_versiones",
     "reportes.ver_dashboard",
-    "dashboard.ver_empresa",
+    "trazabilidad.ver",
+    "importaciones.ver",
 ]
 
 COMPANY_ADMIN_CODES = [
@@ -238,7 +250,8 @@ COMPANY_ADMIN_CODES = [
     "reportes.descargar_pdf",
     "reportes.ver_versiones",
     "reportes.ver_dashboard",
-    "dashboard.ver_empresa",
+    "trazabilidad.ver",
+    "importaciones.ver",
 ]
 
 COMPANY_SAMPLE_LOADER_CODES = [
@@ -264,7 +277,6 @@ COMPANY_SAMPLE_LOADER_CODES = [
     "reportes.ver",
     "reportes.descargar_pdf",
     "reportes.ver_dashboard",
-    "dashboard.ver_empresa",
 ]
 
 LAB_CODES = [
@@ -290,7 +302,6 @@ LAB_CODES = [
     "resultados.importar",
     "resultados.exportar",
     "revision.ver",
-    "dashboard.ver_laboratorio",
 ]
 
 REVIEWER_CODES = [
@@ -318,9 +329,10 @@ REVIEWER_CODES = [
     "reportes.restaurar_version",
     "reportes.subir_firma",
     "reportes.ver_dashboard",
+    "reportes.aprobar",
+    "reportes.anular",
     "resultados.ver",
     "resultados.ver_historico",
-    "dashboard.ver_reportes",
 ]
 
 
@@ -347,6 +359,7 @@ def sync_default_roles_and_permissions():
                 "name": name,
                 "scope": scope,
                 "legacy_role": legacy_role,
+                "default_home_path": DEFAULT_ROLE_HOME_PATHS.get(code, ""),
                 "editable": code != "admin_global",
                 "active": True,
             },

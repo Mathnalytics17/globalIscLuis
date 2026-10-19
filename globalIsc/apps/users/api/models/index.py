@@ -72,6 +72,9 @@ class User(AbstractUser):
     
     # Additional fields
     phone = models.CharField(max_length=20, blank=True)
+    # Ruta preferida al iniciar sesión. Vacía significa que el sistema decide
+    # según el rol y los permisos vigentes del usuario.
+    home_path = models.CharField(max_length=160, blank=True, default="")
     
     avatar = models.CharField(max_length=255, blank=True, null=True)
     firma_predeterminada = models.ImageField(
@@ -163,6 +166,9 @@ class SecurityRole(models.Model):
     code = models.SlugField(max_length=80, unique=True)
     scope = models.CharField(max_length=20, choices=Scope.choices, default=Scope.COMPANY)
     description = models.TextField(blank=True)
+    # Inicio compartido por quienes tengan este rol. El usuario puede dejar
+    # una preferencia propia en blanco o sobrescribirlo explícitamente.
+    default_home_path = models.CharField(max_length=160, blank=True, default="")
     editable = models.BooleanField(default=True)
     active = models.BooleanField(default=True, db_index=True)
     legacy_role = models.CharField(max_length=50, choices=User.Role.choices, blank=True)

@@ -30,6 +30,13 @@ import logging
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
+# Una preferencia de inicio nunca debe ser un redireccionamiento arbitrario.
+ALLOWED_HOME_PATHS = {
+    "", "/dashboard", "/activesTree", "/machines", "/muestras/lotes",
+    "/muestras/nuevo-lote", "/muestras/laboratorio", "/muestras/resultados",
+    "/muestras/revision-resultados", "/muestras/interpretacion", "/reportes",
+}
+
 class UserRegistrationSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     password2 = serializers.CharField(write_only=True)
@@ -68,7 +75,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'email', 'first_name', 'last_name', 'full_name', 'role', 'phone',
+            'id', 'email', 'first_name', 'last_name', 'full_name', 'role', 'phone', 'home_path',
             'is_active', 'is_superuser', 'email_verified', 'empresa', 'empresa_id', 'access_status',
             'is_read_only', 'blocked_at', 'blocked_by', 'block_reason', 'block_scope',
             'permissions', 'profile', 'firma_predeterminada',
@@ -77,6 +84,12 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_full_name(self, obj):
         return obj.get_full_name() or obj.email
+
+    def validate_home_path(self, value):
+        value = str(value or "").strip()
+        if value not in ALLOWED_HOME_PATHS:
+            raise serializers.ValidationError("Seleccione una página de inicio válida.")
+        return value
 
     def validate_firma_predeterminada(self, value):
         if value is None:
@@ -125,6 +138,7 @@ class UserSerializer(serializers.ModelSerializer):
             "role_name": getattr(profile.role, "name", None),
             "role_code": getattr(profile.role, "code", None),
             "role_scope": getattr(profile.role, "scope", None),
+            "role_default_home_path": getattr(profile.role, "default_home_path", ""),
             "is_company_admin": profile.is_company_admin,
             "status": profile.status,
         }
@@ -145,7 +159,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 
                  'is_active', 'role', 'email_verified', 'date_joined', 
-                 'empresa', 'empresa_id', 'phone', 'access_status',
+                 'empresa', 'empresa_id', 'phone', 'home_path', 'access_status',
                  'is_read_only', 'blocked_at', 'blocked_by', 'block_reason', 'block_scope',
                  'firma_predeterminada']
         extra_kwargs = {
@@ -169,6 +183,12 @@ class UserDetailSerializer(serializers.ModelSerializer):
                     for field in attempted
                 })
         return attrs
+
+    def validate_home_path(self, value):
+        value = str(value or "").strip()
+        if value not in ALLOWED_HOME_PATHS:
+            raise serializers.ValidationError("Seleccione una página de inicio válida.")
+        return value
 
     def update(self, instance, validated_data):
         # Evitar que se actualice el username y bloquear cambio de empresa.
@@ -305,10 +325,23 @@ class SecurityRoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = SecurityRole
         fields = [
-            "id", "name", "code", "scope", "description", "editable", "active",
+            "id", "name", "code", "scope", "description", "default_home_path", "editable", "active",
             "legacy_role", "permissions", "permission_codes", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_default_home_path(self, value):
+        value = str(value or "").strip()
+        if value not in ALLOWED_HOME_PATHS:
+            raise serializers.ValidationError("Seleccione una página de inicio válida.")
+        return value
+
+    def validate(self, attrs):
+        default_home = attrs.get("default_home_path", getattr(self.instance, "default_home_path", ""))
+        scope = attrs.get("scope", getattr(self.instance, "scope", None))
+        if default_home == "/dashboard" and scope != SecurityRole.Scope.GLOBAL:
+            raise serializers.ValidationError({"default_home_path": "El Dashboard operativo solo se puede asignar a roles Global Oil."})
+        return attrs
 
     def get_permissions(self, obj):
         return list(
