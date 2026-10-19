@@ -11,6 +11,7 @@ from rest_framework.test import APIRequestFactory
 from rest_framework.test import force_authenticate
 
 from apps.misc.api.models.companies.index import Empresa
+from apps.activesTree.api.models.machines.index import Maquina
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.muestras.index import Muestra
 from apps.reporte.api.models.index import Reporte
@@ -248,6 +249,29 @@ class ReportEmailTests(TestCase):
         self.assertEqual(response.data["summary"]["total"], 1)
         self.assertNotIn("snapshot", response.data["results"][0])
         self.assertEqual(response.data["results"][0]["ultima_version"], 1)
+
+    def test_dashboard_accepts_combined_lot_and_machine_search(self):
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+        machine = Maquina.objects.create(
+            empresa=self.company,
+            codigo_equipo="DEMO-DRAGA-05",
+            nombre="DEMO - DRAGA CUCHARA 05",
+        )
+        self.sample.referencia_equipo = machine
+        self.sample.save(update_fields=["referencia_equipo"])
+
+        factory = APIRequestFactory()
+        request = factory.get(
+            "/api/lubrication/reports/dashboard/",
+            {"lote": self.batch.id, "search": "DEMO-DRAGA"},
+        )
+        force_authenticate(request, user=self.user)
+        response = ReporteViewSet.as_view({"get": "dashboard"})(request)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["summary"]["total"], 1)
+        self.assertEqual(response.data["results"][0]["consecutivo"], self.report.consecutivo)
 
     def _approve(self, report):
         report.usuario_aprobacion = self.user
