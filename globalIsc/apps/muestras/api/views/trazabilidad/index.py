@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from apps.muestras.api.models.auditoria import EventoAuditoriaOperativa
 from apps.muestras.api.serializers.auditoria import EventoAuditoriaOperativaSerializer
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import scope_queryset
 from apps.utils.pagination import StandardResultsSetPagination
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 
@@ -44,10 +45,7 @@ class TrazabilidadViewSet(ActionPermissionMixin, viewsets.ReadOnlyModelViewSet):
             "actor", "empresa", "lote", "muestra", "prueba_muestra",
             "reporte", "maquina", "punto_muestreo",
         )
-        user = self.request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            queryset = queryset.filter(empresa_id=getattr(user, "empresa_id", None))
-        return queryset
+        return scope_queryset(queryset, self.request.user, "empresa_id")
 
     @staticmethod
     def _option_rows(queryset, id_field, label_field):

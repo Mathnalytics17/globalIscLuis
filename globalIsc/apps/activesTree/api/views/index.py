@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from apps.utils.pagination import StandardResultsSetPagination
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import can_access_company, scope_queryset
 
 from apps.activesTree.api.models.index import Carpeta, PuntoMuestreo, AsignacionPuntoMuestreo, Lubricante
 from apps.activesTree.api.models.machines.index import Maquina
@@ -58,8 +59,7 @@ class FolderViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = self.queryset
         user = self.request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            queryset = queryset.filter(compania=user.empresa)
+        queryset = scope_queryset(queryset, user, "compania_id")
         nombre = self.request.query_params.get('nombre')
         if nombre:
             queryset = queryset.filter(nombre=nombre)
@@ -130,8 +130,7 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = self.queryset
         user = self.request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            queryset = queryset.filter(empresa=user.empresa)
+        queryset = scope_queryset(queryset, user, "empresa_id")
         if self.action != 'reactivate' and self.request.query_params.get('include_inactive') not in ['1', 'true', 'True']:
             queryset = queryset.filter(activo=True)
         if self.request.query_params.get('include_muestras') in ['1', 'true', 'True']:
@@ -349,8 +348,7 @@ class PuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             muestras_asociadas=Count('asignaciones', filter=Q(asignaciones__activa=True)),
         )
         user = self.request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            queryset = queryset.filter(maquina__empresa=user.empresa)
+        queryset = scope_queryset(queryset, user, "maquina__empresa_id")
         machine = self.request.query_params.get('machine')
         if machine:
             queryset = queryset.filter(maquina_id=machine)
@@ -472,10 +470,12 @@ class PuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         candidates = list(candidates.filter(selector).distinct())
 
         user = request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            if point.maquina.empresa_id != getattr(user, 'empresa_id', None):
-                self.permission_denied(request)
-            candidates = [item for item in candidates if item.referencia_equipo and item.referencia_equipo.empresa_id == user.empresa_id]
+        if not can_access_company(user, point.maquina.empresa_id):
+            self.permission_denied(request)
+        candidates = [
+            item for item in candidates
+            if item.referencia_equipo and can_access_company(user, item.referencia_equipo.empresa_id)
+        ]
 
         eligible = [item for item in candidates if item.referencia_equipo_id == point.maquina_id]
         incompatible = [
@@ -566,8 +566,7 @@ class AsignacionPuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ReadOnlyMod
             'muestra', 'muestra__lote', 'punto_muestreo', 'punto_muestreo__maquina',
         )
         user = self.request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            queryset = queryset.filter(punto_muestreo__maquina__empresa=user.empresa)
+        queryset = scope_queryset(queryset, user, "punto_muestreo__maquina__empresa_id")
         if self.request.query_params.get('active', 'true').lower() != 'all':
             queryset = queryset.filter(activa=self.request.query_params.get('active', 'true').lower() == 'true')
         if self.request.query_params.get('point'):

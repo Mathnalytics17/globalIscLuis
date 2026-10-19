@@ -24,6 +24,7 @@ from apps.muestras.api.models.sampleBatchExcel.index import SampleBatchExcelTemp
 from apps.muestras.api.models.importaciones import CorridaImportacion
 from apps.muestras.services.operational_audit import record_operational_event
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import can_access_company
 
 SCHEMA_VERSION = "sample-batch-v6-manual-sampling-points"
 TEMPLATE_ROWS = 500
@@ -416,9 +417,8 @@ class SampleBatchExcelImportViewSet(ActionPermissionMixin, viewsets.ViewSet):
             empresa = Empresa.objects.filter(pk=cliente_empresa).first()
             if not empresa:
                 return Response({"detail": "La empresa seleccionada no existe."}, status=status.HTTP_400_BAD_REQUEST)
-        if cliente_empresa and not (request.user.is_superuser or request.user.role == User.Role.GLOBAL):
-            if str(cliente_empresa) != str(request.user.empresa_id):
-                return Response({"detail": "No puede generar plantilla para otra empresa."}, status=status.HTTP_403_FORBIDDEN)
+        if cliente_empresa and not can_access_company(request.user, cliente_empresa):
+            return Response({"detail": "No puede generar plantilla para otra empresa."}, status=status.HTTP_403_FORBIDDEN)
         token = SampleBatchExcelTemplateToken.objects.create(
             requested_by=request.user,
             cliente_empresa_id=str(empresa.pk) if empresa else None,
@@ -456,6 +456,8 @@ class SampleBatchExcelImportViewSet(ActionPermissionMixin, viewsets.ViewSet):
             return Response({"detail": "Plantilla vencida o incompatible. Genere una nueva."}, status=status.HTTP_400_BAD_REQUEST)
         if token.requested_by_id and token.requested_by_id != request.user.id:
             return Response({"detail": "La plantilla pertenece a otro usuario. Genere una nueva."}, status=status.HTTP_403_FORBIDDEN)
+        if token.cliente_empresa_id and not can_access_company(request.user, token.cliente_empresa_id):
+            return Response({"detail": "Ya no tiene acceso a la empresa de esta plantilla."}, status=status.HTTP_403_FORBIDDEN)
 
         fields_by_type = technical_fields_by_type()
         if stored_headers != expected_header_meta(fields_by_type):

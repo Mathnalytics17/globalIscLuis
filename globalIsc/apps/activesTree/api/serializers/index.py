@@ -4,6 +4,7 @@ from apps.activesTree.api.models.index import Carpeta, PuntoMuestreo, Asignacion
 from apps.activesTree.api.models.machines.index import Maquina
 from apps.muestras.api.serializers.muestras.index import MuestraListSerializer
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import can_access_company
 
 
 class MaquinaSerializer(serializers.ModelSerializer):
@@ -52,6 +53,13 @@ class MaquinaSerializer(serializers.ModelSerializer):
         """Count points here so every Machines view can expose the real sampling setup."""
         return obj.puntos_muestreo.filter(activo=True).count()
 
+    def validate(self, attrs):
+        empresa = attrs.get('empresa') or getattr(self.instance, 'empresa', None)
+        request = self.context.get('request')
+        if empresa and request and not can_access_company(request.user, empresa.id):
+            raise serializers.ValidationError({'empresa': 'No tiene acceso a esta empresa.'})
+        return attrs
+
 
 class MaquinaConMuestrasSerializer(MaquinaSerializer):
     muestras = serializers.SerializerMethodField(read_only=True)
@@ -90,6 +98,10 @@ class CarpetaSerializer(serializers.ModelSerializer):
     def validate(self, data):
         if 'compania' not in data and not self.instance:
             raise serializers.ValidationError({'compania': 'La compania es obligatoria'})
+        compania = data.get('compania') or getattr(self.instance, 'compania', None)
+        request = self.context.get('request')
+        if compania and request and not can_access_company(request.user, compania.id):
+            raise serializers.ValidationError({'compania': 'No tiene acceso a esta empresa.'})
         return data
 
 
@@ -130,9 +142,8 @@ class PuntoMuestreoSerializer(serializers.ModelSerializer):
     def validate_maquina(self, maquina):
         request = self.context.get('request')
         user = getattr(request, 'user', None)
-        if user and not (user.is_superuser or user.role == User.Role.GLOBAL):
-            if maquina.empresa_id != getattr(user, 'empresa_id', None):
-                raise serializers.ValidationError('La maquina no pertenece a su empresa.')
+        if user and not can_access_company(user, maquina.empresa_id):
+            raise serializers.ValidationError('No tiene acceso a la empresa de esta máquina.')
         return maquina
 
 

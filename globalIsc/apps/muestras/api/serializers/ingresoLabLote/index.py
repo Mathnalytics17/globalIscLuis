@@ -4,6 +4,7 @@ from rest_framework import serializers
 from apps.muestras.api.models.ingresoLabLote.index import IngresoLabLote
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import can_access_company
 
 
 class LabSampleMiniSerializer(serializers.Serializer):
@@ -174,11 +175,7 @@ class CreateIngresoLabLoteSerializer(serializers.ModelSerializer):
         user = getattr(request, "user", None)
         # The id received from the client is a locator, never authorization.
         # Prevent BOLA/IDOR when a company user alters a URL or request body.
-        if (
-            user
-            and not (user.is_superuser or user.role == User.Role.GLOBAL)
-            and lote.cliente_empresa_id != user.empresa_id
-        ):
+        if user and not can_access_company(user, lote.cliente_empresa_id):
             raise serializers.ValidationError("No tiene acceso a este lote.")
 
         if hasattr(lote, "ingreso_lab_lote"):

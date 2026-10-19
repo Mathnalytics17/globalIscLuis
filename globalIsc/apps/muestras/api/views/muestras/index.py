@@ -10,6 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import accessible_company_ids
 
 from apps.muestras.api.models.muestras.index import Muestra
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
@@ -79,10 +80,11 @@ class MuestraViewSetList(ActionPermissionMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
-        if user.is_superuser or user.role == User.Role.GLOBAL:
+        company_ids = accessible_company_ids(user)
+        if company_ids is None:
             return queryset
         return queryset.filter(
-            Q(lote__cliente_empresa=user.empresa) | Q(referencia_equipo__empresa=user.empresa)
+            Q(lote__cliente_empresa_id__in=company_ids) | Q(referencia_equipo__empresa_id__in=company_ids)
         ).distinct()
 
     def list(self, request, *args, **kwargs):
@@ -117,10 +119,11 @@ class MuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
-        if user.is_superuser or user.role == User.Role.GLOBAL:
+        company_ids = accessible_company_ids(user)
+        if company_ids is None:
             return queryset
         return queryset.filter(
-            Q(lote__cliente_empresa=user.empresa) | Q(referencia_equipo__empresa=user.empresa)
+            Q(lote__cliente_empresa_id__in=company_ids) | Q(referencia_equipo__empresa_id__in=company_ids)
         ).distinct()
 
     def get_serializer_class(self):

@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from permissions import ActionPermissionMixin, HasSecurityPermission
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import scope_queryset
 from apps.activesTree.api.serializers.activesTree.index import RecursiveFolderSerializer
 from apps.activesTree.api.models.index import Carpeta
 from apps.activesTree.services import ensure_active_company_roots
@@ -35,8 +36,7 @@ class ActivesTreeViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 'machine__puntos_muestreo__lubricante_catalogo',
             )
             user = request.user
-            if not (user.is_superuser or user.role == User.Role.GLOBAL):
-                queryset = queryset.filter(compania=user.empresa)
+            queryset = scope_queryset(queryset, user, "compania_id")
             folders = list(queryset.order_by('id'))
             children_by_parent = defaultdict(list)
             for folder in folders:

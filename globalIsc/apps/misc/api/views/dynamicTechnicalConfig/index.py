@@ -50,6 +50,7 @@ from apps.misc.api.services.limit_contract import (
     test_limit_leaves as _test_limit_leaves,
 )
 from apps.muestras.api.models.muestras.index import Muestra
+from apps.users.api.data_scope import scope_queryset
 from apps.muestras.services.operational_audit import record_operational_event
 from apps.muestras.api.services.limit_engine import resolve_limit_for_result, resolve_and_evaluate_result
 
@@ -1035,11 +1036,7 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
     @action(detail=False, methods=["post"], url_path="resolve-preview")
     def resolve_preview(self, request):
         muestras = Muestra.objects.select_related("lote")
-        user = request.user
-        if not (user.is_superuser or getattr(user, "role", None) == "GLOBAL"):
-            if not user.empresa_id:
-                return Response({"detail": "No tiene acceso a la muestra indicada."}, status=status.HTTP_404_NOT_FOUND)
-            muestras = muestras.filter(lote__cliente_empresa_id=user.empresa_id)
+        muestras = scope_queryset(muestras, request.user, "lote__cliente_empresa_id")
         muestra = muestras.filter(pk=request.data.get("muestra")).first()
         if not muestra:
             return Response({"detail": "No tiene acceso a la muestra indicada."}, status=status.HTTP_404_NOT_FOUND)

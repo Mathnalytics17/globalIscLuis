@@ -11,6 +11,7 @@ from apps.users.api.models.index import (
     User,
     UserAuditLog,
     UserCompanyProfile,
+    UserDataScopeCompany,
     UserInvitation,
 )
 from apps.users.api.serializers.index import (
@@ -19,6 +20,7 @@ from apps.users.api.serializers.index import (
     UserAuditLogSerializer,
     UserBlockSerializer,
     UserCompanyProfileSerializer,
+    UserDataScopeCompanySerializer,
     UserInvitationAcceptSerializer,
     UserInvitationSerializer,
     UserInviteCreateSerializer,
@@ -54,7 +56,10 @@ class GlobalOrPermissionMixin:
 
 
 class SecurityPermissionViewSet(GlobalOrPermissionMixin, viewsets.ReadOnlyModelViewSet):
-    queryset = SecurityPermission.objects.all().order_by("module", "action")
+    # A permission that was retired must never be offered by the role editor.
+    # Otherwise the browser can submit its code again and the serializer rightly
+    # rejects it as inactive, which used to surface as "Permisos inexistentes".
+    queryset = SecurityPermission.objects.filter(active=True).order_by("module", "action")
     serializer_class = SecurityPermissionSerializer
     permission_classes = [IsAuthenticated]
     required_permission = "permisos.ver_matriz"
@@ -96,6 +101,7 @@ class SecurityRoleViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
         "destroy": "roles.eliminar",
         "assignable": "usuarios.invitar",
         "matrix": "permisos.ver_matriz",
+        "role_matrix": "permisos.ver_matriz",
         "update_matrix": "permisos.editar_matriz",
         "reactivate": "roles.editar",
     }
@@ -153,6 +159,15 @@ class SecurityRoleViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
             "roles": SecurityRoleSerializer(roles, many=True).data,
             "permissions": SecurityPermissionSerializer(permissions, many=True).data,
         })
+
+    def role_matrix(self, request, pk=None):
+        """Read the effective matrix for one role without relying on a list fallback."""
+        if not self._is_global():
+            self.permission_denied(request, message="Solo GlobalOil puede ver la matriz de permisos.")
+        role = self.get_object()
+        payload = self.get_serializer(role).data
+        payload["permission_codes"] = [item["code"] for item in payload.get("permissions", [])]
+        return Response(payload)
 
     @action(detail=True, methods=["put", "patch"], url_path="matrix")
     def update_matrix(self, request, pk=None):
@@ -222,6 +237,39 @@ class UserCompanyProfileViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
             profile.user.save(update_fields=["is_active", "is_read_only", "access_status"])
         audit_user_action(request, "users.profile_remove", target_user=profile.user, empresa=profile.empresa, detail=profile.block_reason, metadata={"profile_id": profile.id})
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UserDataScopeCompanyViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
+    """Global Oil assigns the explicit company set for restricted internals."""
+    queryset = UserDataScopeCompany.objects.select_related("user", "empresa", "assigned_by")
+    serializer_class = UserDataScopeCompanySerializer
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ["user", "empresa"]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if not self._is_global():
+            self.permission_denied(request, message="Solo Global Oil puede gestionar alcances entre empresas.")
+
+    def perform_create(self, serializer):
+        assignment = serializer.save(assigned_by=self.request.user)
+        audit_user_action(
+            self.request,
+            "users.data_scope_company_assigned",
+            target_user=assignment.user,
+            empresa=assignment.empresa,
+            metadata={"assignment_id": assignment.id},
+        )
+
+    def perform_destroy(self, instance):
+        audit_user_action(
+            self.request,
+            "users.data_scope_company_removed",
+            target_user=instance.user,
+            empresa=instance.empresa,
+            metadata={"assignment_id": instance.id},
+        )
+        instance.delete()
 
 
 class UserInvitationViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):

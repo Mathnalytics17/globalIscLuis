@@ -41,6 +41,12 @@ class CustomUserManager(BaseUserManager):
         return self._create_user(email, password, **extra_fields)
 
 class User(AbstractUser):
+    class DataScopeOverride(models.TextChoices):
+        INHERIT = "", "Heredar del rol"
+        OWN_COMPANY = "OWN_COMPANY", "Solo su empresa"
+        ALL_COMPANIES = "ALL_COMPANIES", "Todas las empresas"
+        ASSIGNED_COMPANIES = "ASSIGNED_COMPANIES", "Empresas asignadas"
+        GLOBAL_OIL_ONLY = "GLOBAL_OIL_ONLY", "Solo Global Oil"
     class Role(models.TextChoices):
         GLOBAL= "GLOBAL", "GlobalOil"
         ADMIN = "ADMINISTRADOR", "Administrador"
@@ -75,6 +81,12 @@ class User(AbstractUser):
     # Ruta preferida al iniciar sesión. Vacía significa que el sistema decide
     # según el rol y los permisos vigentes del usuario.
     home_path = models.CharField(max_length=160, blank=True, default="")
+    data_scope_override = models.CharField(
+        max_length=32,
+        choices=DataScopeOverride.choices,
+        blank=True,
+        default="",
+    )
     
     avatar = models.CharField(max_length=255, blank=True, null=True)
     firma_predeterminada = models.ImageField(
@@ -162,6 +174,12 @@ class SecurityRole(models.Model):
         COMPANY = "COMPANY", "Empresa"
         INTERNAL = "INTERNAL", "Interno"
 
+    class DataScope(models.TextChoices):
+        OWN_COMPANY = "OWN_COMPANY", "Solo su empresa"
+        ALL_COMPANIES = "ALL_COMPANIES", "Todas las empresas"
+        ASSIGNED_COMPANIES = "ASSIGNED_COMPANIES", "Empresas asignadas"
+        GLOBAL_OIL_ONLY = "GLOBAL_OIL_ONLY", "Solo Global Oil"
+
     name = models.CharField(max_length=120)
     code = models.SlugField(max_length=80, unique=True)
     scope = models.CharField(max_length=20, choices=Scope.choices, default=Scope.COMPANY)
@@ -169,6 +187,12 @@ class SecurityRole(models.Model):
     # Inicio compartido por quienes tengan este rol. El usuario puede dejar
     # una preferencia propia en blanco o sobrescribirlo explícitamente.
     default_home_path = models.CharField(max_length=160, blank=True, default="")
+    data_scope = models.CharField(
+        max_length=32,
+        choices=DataScope.choices,
+        default=DataScope.OWN_COMPANY,
+        db_index=True,
+    )
     editable = models.BooleanField(default=True)
     active = models.BooleanField(default=True, db_index=True)
     legacy_role = models.CharField(max_length=50, choices=User.Role.choices, blank=True)
@@ -250,6 +274,22 @@ class UserCompanyProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.empresa.nombre}"
+
+
+class UserDataScopeCompany(models.Model):
+    """Empresas adicionales para un usuario con alcance ASSIGNED_COMPANIES."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="data_scope_companies")
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name="data_scope_users")
+    assigned_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="assigned_data_scopes")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "empresa")
+        indexes = [models.Index(fields=["user", "empresa"])]
+
+    def __str__(self):
+        return f"{self.user.email} -> {self.empresa.nombre}"
 
 
 class UserInvitation(models.Model):

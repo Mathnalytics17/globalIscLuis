@@ -39,6 +39,7 @@ from apps.reporte.api.serializers.index import (
 from apps.resultado.api.views.index import _sample_tests_for_lote
 from apps.resultado.api.models.index import VersionInterpretacion
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import scope_queryset
 from apps.users.api.services import audit_user_action
 from apps.muestras.services.operational_audit import record_operational_event
 from PIL import Image, UnidentifiedImageError
@@ -415,7 +416,14 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "usuario_envio",
     ).prefetch_related("envios")
 
-    def get_queryset(self):
+    def _scoped_queryset(self):
+        """Reports visible to the caller before applying library filters.
+
+        The report library must not depend on ``maquinas.ver`` or
+        ``activos.ver`` merely to populate its filters.  A laboratorist who
+        can consult reports can therefore filter the reports already in their
+        permitted data scope without gaining permission to administer assets.
+        """
         latest_version = (
             Reporte.objects.filter(muestra_id=OuterRef("muestra_id"))
             .order_by("-version")
@@ -424,14 +432,75 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         queryset = self.queryset.annotate(
             ultima_version_value=Subquery(latest_version)
         )
-        user = self.request.user
+        queryset = scope_queryset(queryset, self.request.user, "lote__cliente_empresa_id")
+        if getattr(self.request.user, "role", None) == "EMPRESA":
+            queryset = queryset.filter(visible_cliente=True)
+        return queryset
 
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            queryset = queryset.filter(lote__cliente_empresa=getattr(user, "empresa", None))
-        if getattr(user, "role", None) == "EMPRESA":
-            queryset = queryset.filter(
-                visible_cliente=True,
+    def _dashboard_filter_options(self):
+        """Return report-derived filter values under exactly the same scope."""
+        queryset = self._scoped_queryset()
+
+        companies = list(
+            queryset.exclude(lote__cliente_empresa_id__isnull=True)
+            .order_by("lote__cliente_empresa_id", "lote__cliente_empresa__nombre")
+            .values("lote__cliente_empresa_id", "lote__cliente_empresa__nombre")
+            .distinct()
+        )
+        machines = list(
+            queryset.exclude(muestra__referencia_equipo_id__isnull=True)
+            .order_by(
+                "muestra__referencia_equipo_id",
+                "muestra__referencia_equipo__nombre",
+                "muestra__referencia_equipo__codigo_equipo",
             )
+            .values(
+                "muestra__referencia_equipo_id",
+                "muestra__referencia_equipo__nombre",
+                "muestra__referencia_equipo__codigo_equipo",
+            )
+            .distinct()
+        )
+        sampling_points = list(
+            queryset.filter(muestra__asignaciones_punto_muestreo__activa=True)
+            .exclude(muestra__asignaciones_punto_muestreo__punto_muestreo_id__isnull=True)
+            .order_by(
+                "muestra__asignaciones_punto_muestreo__punto_muestreo_id",
+                "muestra__asignaciones_punto_muestreo__punto_muestreo__nombre",
+            )
+            .values(
+                "muestra__asignaciones_punto_muestreo__punto_muestreo_id",
+                "muestra__asignaciones_punto_muestreo__punto_muestreo__nombre",
+                "muestra__asignaciones_punto_muestreo__punto_muestreo__maquina_id",
+            )
+            .distinct()
+        )
+
+        return {
+            "companies": [
+                {"id": row["lote__cliente_empresa_id"], "nombre": row["lote__cliente_empresa__nombre"]}
+                for row in companies
+            ],
+            "machines": [
+                {
+                    "id": row["muestra__referencia_equipo_id"],
+                    "nombre": row["muestra__referencia_equipo__nombre"],
+                    "codigo_equipo": row["muestra__referencia_equipo__codigo_equipo"],
+                }
+                for row in machines
+            ],
+            "sampling_points": [
+                {
+                    "id": row["muestra__asignaciones_punto_muestreo__punto_muestreo_id"],
+                    "nombre": row["muestra__asignaciones_punto_muestreo__punto_muestreo__nombre"],
+                    "maquina_id": row["muestra__asignaciones_punto_muestreo__punto_muestreo__maquina_id"],
+                }
+                for row in sampling_points
+            ],
+        }
+
+    def get_queryset(self):
+        queryset = self._scoped_queryset()
 
         muestra_id = self.request.query_params.get("muestra")
         lote_id = self.request.query_params.get("lote")
@@ -491,21 +560,11 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         queryset = Muestra.objects.select_related(
             "lote", "lote__cliente_empresa", "lote__tipo_gestion", "referencia_equipo"
         )
-        user = self.request.user
-        if user.is_superuser or user.role == User.Role.GLOBAL:
-            return queryset
-        if not user.empresa_id:
-            return queryset.none()
-        return queryset.filter(lote__cliente_empresa_id=user.empresa_id)
+        return scope_queryset(queryset, self.request.user, "lote__cliente_empresa_id")
 
     def _tenant_batches_queryset(self):
         queryset = LoteMuestras.objects.select_related("cliente_empresa")
-        user = self.request.user
-        if user.is_superuser or user.role == User.Role.GLOBAL:
-            return queryset
-        if not user.empresa_id:
-            return queryset.none()
-        return queryset.filter(cliente_empresa_id=user.empresa_id)
+        return scope_queryset(queryset, self.request.user, "cliente_empresa_id")
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
@@ -654,7 +713,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "resultados": tests,
             "comentarios": comments,
             "graficas": {
-                "activas": interpretation.get("graficas_activas", True),
+                "activas": interpretation.get("graficas_activas", False),
                 "seleccionadas": interpretation.get("graficas_seleccionadas") or [],
             },
             "interpretacion": interpretation,
@@ -865,6 +924,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             # recorremos nuevamente todo el queryset para producirlos.
             "groups": [],
             "results": reportes,
+            "filter_options": self._dashboard_filter_options(),
         })
 
     @action(detail=True, methods=["post"], url_path="publish-client")
