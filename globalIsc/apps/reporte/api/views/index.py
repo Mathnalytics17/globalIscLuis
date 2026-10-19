@@ -475,8 +475,8 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         if search:
             queryset = queryset.filter(
                 Q(consecutivo__icontains=search)
-                | Q(muestra_id__icontains=search)
-                | Q(lote_id__icontains=search)
+                | Q(muestra__id__icontains=search)
+                | Q(lote__id__icontains=search)
                 | Q(lote__cliente_empresa__nombre__icontains=search)
                 | Q(lote__cliente_ocasional_nombre__icontains=search)
                 | Q(muestra__referencia_equipo__nombre__icontains=search)

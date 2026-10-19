@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, PuntoMuestreo
 from apps.activesTree.api.models.machines.index import Maquina
+from apps.activesTree.services import ensure_machine_tree_node
 from apps.misc.api.models.companies.index import Empresa
 from apps.misc.api.models.pruebas.index import Prueba
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
@@ -72,6 +73,7 @@ class Command(BaseCommand):
                     "activo": True,
                 },
             )
+            ensure_machine_tree_node(machine)
             points = [
                 PuntoMuestreo.objects.get_or_create(
                     maquina=machine,
