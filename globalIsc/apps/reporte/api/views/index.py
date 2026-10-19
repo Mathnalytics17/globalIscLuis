@@ -387,7 +387,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     permission_action_map = {
         "list": "reportes.ver",
         "retrieve": "reportes.ver",
-        "dashboard": "reportes.ver_dashboard",
+        "dashboard": "reportes.ver",
         "create": "reportes.generar",
         "generate_from_interpretation": "reportes.generar",
         "generate_batch_from_interpretation": "reportes.generar",
@@ -401,9 +401,9 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "send_batch_email": "reportes.enviar_email",
         "versions": "reportes.ver_versiones",
         "upload_signature": "reportes.subir_firma",
-        "aprobar": "reportes.generar",
+        "aprobar": "reportes.aprobar",
         "enviar_aprobacion": "reportes.enviar_email",
-        "annul": "reportes.generar",
+        "annul": "reportes.anular",
     }
     queryset = Reporte.objects.select_related(
         "muestra",

@@ -2,6 +2,10 @@ from rest_framework import serializers
 from apps.activesTree.api.models.index import Carpeta
 
 class RecursiveFolderSerializer(serializers.ModelSerializer):
+    # A root is a visual projection of its company, not a second editable
+    # business name.  Returning the company value also protects the UI from
+    # legacy roots created before this invariant existed.
+    nombre = serializers.SerializerMethodField()
     subfolders = serializers.SerializerMethodField()
     compania_info = serializers.SerializerMethodField()
     machine_info = serializers.SerializerMethodField()
@@ -14,6 +18,11 @@ class RecursiveFolderSerializer(serializers.ModelSerializer):
             'id', 'nombre', 'typeFolder', 'id_parent_node', 
             'compania_info', 'machine_info', 'muestra_info', 'sampling_points', 'subfolders'
         ]
+
+    def get_nombre(self, obj):
+        if obj.typeFolder == 'root' or str(obj.id_parent_node) == '-1':
+            return obj.compania.nombre if obj.compania_id else obj.nombre
+        return obj.nombre
     
     def get_subfolders(self, obj):
         children_by_parent = self.context.get('children_by_parent', {})

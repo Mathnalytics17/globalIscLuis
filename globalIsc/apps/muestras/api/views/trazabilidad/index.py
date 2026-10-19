@@ -34,9 +34,9 @@ class TrazabilidadViewSet(ActionPermissionMixin, viewsets.ReadOnlyModelViewSet):
     pagination_class = StandardResultsSetPagination
     permission_classes = [IsAuthenticated, DenyReadOnlyWrite, HasSecurityPermission]
     permission_action_map = {
-        "list": "dashboard.ver_empresa",
-        "summary": "dashboard.ver_empresa",
-        "filters": "dashboard.ver_empresa",
+        "list": "trazabilidad.ver",
+        "summary": "trazabilidad.ver",
+        "filters": "trazabilidad.ver",
     }
 
     def _scoped_queryset(self):

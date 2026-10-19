@@ -6,12 +6,12 @@ from unittest.mock import patch
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
-from rest_framework.test import APIRequestFactory, force_authenticate
+from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from apps.misc.api.models.companies.index import Empresa
 from apps.users.api.models.index import User
 from apps.users.api.models.index import SecurityPermission, SecurityRole, UserCompanyProfile
-from apps.users.api.services import accept_invitation, create_invitation
+from apps.users.api.services import accept_invitation, create_invitation, seed_default_permissions
 from apps.users.api.views.user.index import CurrentUserView
 
 
@@ -56,8 +56,64 @@ class UserProfileSignatureTests(TestCase):
             self.assertEqual(remove_response.status_code, 200)
             self.assertIsNone(remove_response.data["firma_predeterminada"])
 
+    def test_user_can_save_only_an_allowed_home_path(self):
+        factory = APIRequestFactory()
+        request = factory.patch("/api/users/me/", {"home_path": "/muestras/laboratorio"}, format="json")
+        force_authenticate(request, user=self.user)
+
+        response = CurrentUserView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["home_path"], "/muestras/laboratorio")
+
+        invalid = factory.patch("/api/users/me/", {"home_path": "https://example.invalid"}, format="json")
+        force_authenticate(invalid, user=self.user)
+        invalid_response = CurrentUserView.as_view()(invalid)
+
+        self.assertEqual(invalid_response.status_code, 400)
+        self.assertIn("home_path", invalid_response.data)
+
 
 class AccessBaselineCommandTests(TestCase):
+    def test_sample_loader_can_view_reports_without_inheriting_traceability(self):
+        seed_default_permissions()
+        loader = SecurityRole.objects.get(code="empresa_carga_muestras")
+        admin = SecurityRole.objects.get(code="admin_empresa")
+
+        loader_codes = set(
+            loader.role_permissions.filter(allowed=True).values_list("permission__code", flat=True)
+        )
+        admin_codes = set(
+            admin.role_permissions.filter(allowed=True).values_list("permission__code", flat=True)
+        )
+
+        self.assertIn("reportes.ver", loader_codes)
+        self.assertNotIn("trazabilidad.ver", loader_codes)
+        self.assertIn("trazabilidad.ver", admin_codes)
+        self.assertIn("importaciones.ver", admin_codes)
+        self.assertEqual(SecurityRole.objects.get(code="laboratorista").default_home_path, "/muestras/laboratorio")
+
+    def test_sample_loader_is_denied_traceability_but_can_open_reports(self):
+        with patch.dict(os.environ, {"DEMO_DEFAULT_PASSWORD": "Test-Only-Demo-Password!"}):
+            call_command("seed_access_baseline", with_demo_accounts=True)
+
+        client = APIClient()
+        client.force_authenticate(User.objects.get(email="muestras@minera.demo"))
+
+        self.assertEqual(client.get("/api/lubrication/traceability/").status_code, 403)
+        self.assertEqual(client.get("/api/lubrication/reports/dashboard/").status_code, 200)
+
+    def test_operational_dashboard_is_global_only(self):
+        with patch.dict(os.environ, {"DEMO_DEFAULT_PASSWORD": "Test-Only-Demo-Password!"}):
+            call_command("seed_access_baseline", with_demo_accounts=True)
+
+        client = APIClient()
+        client.force_authenticate(User.objects.get(email="laboratorio@globaloil.demo"))
+        self.assertEqual(client.get("/api/dashboard/operational-center/").status_code, 403)
+
+        client.force_authenticate(User.objects.get(email="admin.global@globaloil.demo"))
+        self.assertEqual(client.get("/api/dashboard/operational-center/").status_code, 200)
+
     def test_demo_seed_is_idempotent_and_uses_environment_password(self):
         password = "Test-Only-Demo-Password!"
         with patch.dict(os.environ, {"DEMO_DEFAULT_PASSWORD": password}):
