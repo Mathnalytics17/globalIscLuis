@@ -11,6 +11,7 @@ from apps.activesTree.api.models.machines.index import Maquina
 from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, PuntoMuestreo, Lubricante
 from apps.activesTree.services import ensure_machine_tree_node
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import can_access_company, effective_data_scope
 from apps.muestras.api.serializers.muestras.index import MuestraListSerializer, MuestraSerializer
 from apps.misc.api.serializers.tipoGestionMuestra.index import TipoGestionMuestraSerializer
 from apps.muestras.api.serializers.muestraAtributoTecnico.index import (
@@ -447,7 +448,7 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
         user = getattr(request, "user", None)
         tipo_cliente = attrs.get("tipo_cliente")
 
-        if user and user.is_authenticated and not (user.is_superuser or user.role == User.Role.GLOBAL):
+        if user and user.is_authenticated and effective_data_scope(user) == "OWN_COMPANY":
             attrs["tipo_cliente"] = "registrado"
             attrs["cliente_empresa"] = user.empresa
             attrs["cliente_ocasional_nombre"] = None
@@ -464,6 +465,8 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
             })
 
         empresa = attrs.get("cliente_empresa")
+        if empresa and user and user.is_authenticated and not can_access_company(user, empresa.id):
+            raise serializers.ValidationError({"cliente_empresa": "No tiene acceso a esta empresa."})
         for muestra in attrs.get("muestras") or []:
             point = muestra.get("punto_muestreo")
             if point and empresa and point.maquina.empresa_id != empresa.id:

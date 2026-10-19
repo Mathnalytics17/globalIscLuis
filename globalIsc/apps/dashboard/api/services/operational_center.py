@@ -8,6 +8,7 @@ from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
 from apps.reporte.api.models.index import Reporte
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import scope_queryset
 
 
 CLOSED_BATCH_STATES = {"reportado", "cancelado"}
@@ -54,9 +55,7 @@ def scoped_batches_for_user(user):
     queryset = LoteMuestras.objects.select_related("cliente_empresa", "tipo_gestion", "usuario_registro").prefetch_related("muestras")
     if not user or not user.is_authenticated:
         return queryset.none()
-    if user.is_superuser or user.role in [User.Role.GLOBAL, User.Role.LABORATORISTA]:
-        return queryset
-    return queryset.filter(cliente_empresa=user.empresa)
+    return scope_queryset(queryset, user, "cliente_empresa_id")
 
 
 def _base_date(batch):

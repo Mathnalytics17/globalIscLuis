@@ -19,6 +19,7 @@ from rest_framework.exceptions import ValidationError
 from apps.utils.pagination import StandardResultsSetPagination
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import scope_queryset
 from apps.muestras.services.operational_audit import record_operational_event
 
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
@@ -1386,31 +1387,21 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        user = self.request.user
-        if user.is_superuser or user.role == User.Role.GLOBAL:
-            return queryset
-        return queryset.filter(prueba_muestra__muestra__lote__cliente_empresa=user.empresa)
+        return scope_queryset(
+            queryset, self.request.user, "prueba_muestra__muestra__lote__cliente_empresa_id"
+        )
 
     def _scope_lotes(self, queryset=None):
         queryset = queryset or LoteMuestras.objects.all()
-        user = self.request.user
-        if user.is_superuser or user.role == User.Role.GLOBAL:
-            return queryset
-        return queryset.filter(cliente_empresa=user.empresa)
+        return scope_queryset(queryset, self.request.user, "cliente_empresa_id")
 
     def _scope_sample_tests(self, queryset=None):
         queryset = queryset or PruebaMuestra.objects.all()
-        user = self.request.user
-        if user.is_superuser or user.role == User.Role.GLOBAL:
-            return queryset
-        return queryset.filter(muestra__lote__cliente_empresa=user.empresa)
+        return scope_queryset(queryset, self.request.user, "muestra__lote__cliente_empresa_id")
 
     def _scope_samples(self, queryset=None):
         queryset = queryset or Muestra.objects.all()
-        user = self.request.user
-        if user.is_superuser or user.role == User.Role.GLOBAL:
-            return queryset
-        return queryset.filter(lote__cliente_empresa=user.empresa)
+        return scope_queryset(queryset, self.request.user, "lote__cliente_empresa_id")
 
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
@@ -3043,7 +3034,9 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "selected_predefined_comments": interpretation.get("comentarios_predefinidos") if "comentarios_predefinidos" in interpretation else _build_predefined_comments(tests),
             "conclusion": interpretation.get("conclusion") or interpretation.get("comentario_proveedor") or "",
             "comentarios_manuales": interpretation.get("comentarios_manuales") or [],
-            "graficas_activas": interpretation.get("graficas_activas", True),
+            # Incluir tendencias es una decisión editorial del informe, no una
+            # consecuencia automática de que la muestra esté revisada.
+            "graficas_activas": interpretation.get("graficas_activas", False),
             "graficas_seleccionadas": interpretation.get("graficas_seleccionadas") or [t["prueba"]["acronimo"] for t in tests[:4]],
             "interpretacion": interpretation,
         })
@@ -3068,7 +3061,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 "conclusion": request.data.get("conclusion") or "",
                 "comentarios_predefinidos": request.data.get("comentarios_predefinidos") or [],
                 "comentarios_manuales": request.data.get("comentarios_manuales") or [],
-                "graficas_activas": bool(request.data.get("graficas_activas", True)),
+                "graficas_activas": bool(request.data.get("graficas_activas", False)),
                 "graficas_seleccionadas": request.data.get("graficas_seleccionadas") or [],
                 "updated_at": timezone.now().isoformat(),
                 "updated_by": request.user.pk,

@@ -358,6 +358,8 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
         target = self.get_object()
         if target != request.user and not self._can_manage_users("usuarios.editar"):
             self.permission_denied(request, message="No tiene permisos para editar este usuario.")
+        if "data_scope_override" in request.data and not (request.user.is_superuser or request.user.role == User.Role.GLOBAL):
+            self.permission_denied(request, message="Solo Global Oil puede modificar el alcance de datos.")
         response = super().update(request, *args, **kwargs)
         audit_user_action(request, "users.update", target_user=target)
         return response
@@ -366,6 +368,8 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
         target = self.get_object()
         if target != request.user and not self._can_manage_users("usuarios.editar"):
             self.permission_denied(request, message="No tiene permisos para editar este usuario.")
+        if "data_scope_override" in request.data and not (request.user.is_superuser or request.user.role == User.Role.GLOBAL):
+            self.permission_denied(request, message="Solo Global Oil puede modificar el alcance de datos.")
         response = super().partial_update(request, *args, **kwargs)
         audit_user_action(request, "users.partial_update", target_user=target)
         return response

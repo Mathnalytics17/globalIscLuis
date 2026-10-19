@@ -242,13 +242,17 @@ class ReportEmailTests(TestCase):
         force_authenticate(request, user=self.user)
         view = ReporteViewSet.as_view({"get": "dashboard"})
 
-        with self.assertNumQueries(2):
+        # Una lectura del listado, una del resumen y tres consultas DISTINCT
+        # pequeñas para Cliente/Equipo/Punto. No se carga el JSON pesado de
+        # cada reporte ni se consulta el módulo de activos por separado.
+        with self.assertNumQueries(5):
             response = view(request)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["summary"]["total"], 1)
         self.assertNotIn("snapshot", response.data["results"][0])
         self.assertEqual(response.data["results"][0]["ultima_version"], 1)
+        self.assertEqual(set(response.data["filter_options"]), {"companies", "machines", "sampling_points"})
 
     def test_dashboard_accepts_combined_lot_and_machine_search(self):
         self.user.is_superuser = True

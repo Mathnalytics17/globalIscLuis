@@ -22,6 +22,7 @@ from apps.misc.api.serializers.pruebas.index import PruebaDetailSerializer, form
 from apps.misc.api.serializers.technicalCatalogs.index import EquipoPruebaSerializer, MetodoEquipoSerializer
 from apps.users.api.serializers.index import UserSerializer
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import can_access_company
 from apps.muestras.api.services.limit_engine import resolve_and_evaluate_sample_test_result
 
 
@@ -206,13 +207,7 @@ class CreatePruebaMuestraSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = getattr(request, "user", None)
         muestra = attrs.get("muestra") or getattr(self.instance, "muestra", None)
-        if (
-            user
-            and muestra
-            and not (user.is_superuser or user.role == User.Role.GLOBAL)
-            and muestra.lote_id
-            and muestra.lote.cliente_empresa_id != user.empresa_id
-        ):
+        if user and muestra and muestra.lote_id and not can_access_company(user, muestra.lote.cliente_empresa_id):
             raise serializers.ValidationError({"muestra": "No tiene acceso a esta muestra."})
 
         prueba = attrs.get("prueba") or getattr(self.instance, "prueba", None)

@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import scope_queryset
 
 from apps.muestras.api.models.ingresoLabLote.index import IngresoLabLote
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
@@ -55,8 +56,7 @@ class IngresoLabLoteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         )
 
         user = self.request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            queryset = queryset.filter(lote__cliente_empresa=user.empresa)
+        queryset = scope_queryset(queryset, user, "lote__cliente_empresa_id")
 
         search = self.request.query_params.get("search")
         if search:
@@ -171,8 +171,7 @@ class IngresoLabLoteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         )
 
         user = request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            queryset = queryset.filter(cliente_empresa=user.empresa)
+        queryset = scope_queryset(queryset, user, "cliente_empresa_id")
 
         search = request.query_params.get("search")
         if search:

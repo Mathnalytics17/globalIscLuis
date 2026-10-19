@@ -11,9 +11,11 @@ from apps.users.api.models.index  import (
     SecurityRolePermission,
     UserAuditLog,
     UserCompanyProfile,
+    UserDataScopeCompany,
     UserInvitation,
 )
 from apps.misc.api.models.companies.index import Empresa
+from apps.users.api.data_scope import effective_data_scope
 import uuid
 from datetime import datetime, timedelta
 from django.conf import settings
@@ -71,19 +73,27 @@ class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
     profile = serializers.SerializerMethodField()
+    effective_data_scope = serializers.SerializerMethodField()
+    assigned_company_ids = serializers.SerializerMethodField()
     
     class Meta:
         model = User
         fields = [
-            'id', 'email', 'first_name', 'last_name', 'full_name', 'role', 'phone', 'home_path',
+            'id', 'email', 'first_name', 'last_name', 'full_name', 'role', 'phone', 'home_path', 'data_scope_override',
             'is_active', 'is_superuser', 'email_verified', 'empresa', 'empresa_id', 'access_status',
             'is_read_only', 'blocked_at', 'blocked_by', 'block_reason', 'block_scope',
-            'permissions', 'profile', 'firma_predeterminada',
+            'permissions', 'profile', 'effective_data_scope', 'assigned_company_ids', 'firma_predeterminada',
         ]
-        read_only_fields = ['id', 'email', 'is_active', 'is_superuser', 'email_verified', 'empresa']
+        read_only_fields = ['id', 'email', 'is_active', 'is_superuser', 'email_verified', 'empresa', 'data_scope_override']
 
     def get_full_name(self, obj):
         return obj.get_full_name() or obj.email
+
+    def get_effective_data_scope(self, obj):
+        return effective_data_scope(obj)
+
+    def get_assigned_company_ids(self, obj):
+        return list(obj.data_scope_companies.values_list("empresa_id", flat=True))
 
     def validate_home_path(self, value):
         value = str(value or "").strip()
@@ -139,6 +149,7 @@ class UserSerializer(serializers.ModelSerializer):
             "role_code": getattr(profile.role, "code", None),
             "role_scope": getattr(profile.role, "scope", None),
             "role_default_home_path": getattr(profile.role, "default_home_path", ""),
+            "role_data_scope": getattr(profile.role, "data_scope", "OWN_COMPANY"),
             "is_company_admin": profile.is_company_admin,
             "status": profile.status,
         }
@@ -159,7 +170,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 
                  'is_active', 'role', 'email_verified', 'date_joined', 
-                 'empresa', 'empresa_id', 'phone', 'home_path', 'access_status',
+                 'empresa', 'empresa_id', 'phone', 'home_path', 'data_scope_override', 'access_status',
                  'is_read_only', 'blocked_at', 'blocked_by', 'block_reason', 'block_scope',
                  'firma_predeterminada']
         extra_kwargs = {
@@ -325,7 +336,7 @@ class SecurityRoleSerializer(serializers.ModelSerializer):
     class Meta:
         model = SecurityRole
         fields = [
-            "id", "name", "code", "scope", "description", "default_home_path", "editable", "active",
+            "id", "name", "code", "scope", "description", "default_home_path", "data_scope", "editable", "active",
             "legacy_role", "permissions", "permission_codes", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
@@ -341,6 +352,9 @@ class SecurityRoleSerializer(serializers.ModelSerializer):
         scope = attrs.get("scope", getattr(self.instance, "scope", None))
         if default_home == "/dashboard" and scope != SecurityRole.Scope.GLOBAL:
             raise serializers.ValidationError({"default_home_path": "El Dashboard operativo solo se puede asignar a roles Global Oil."})
+        data_scope = attrs.get("data_scope", getattr(self.instance, "data_scope", SecurityRole.DataScope.OWN_COMPANY))
+        if scope == SecurityRole.Scope.GLOBAL and data_scope != SecurityRole.DataScope.ALL_COMPANIES:
+            raise serializers.ValidationError({"data_scope": "Los roles Global Oil deben tener alcance sobre todas las empresas."})
         return attrs
 
     def get_permissions(self, obj):
@@ -387,15 +401,26 @@ class UserCompanyProfileSerializer(serializers.ModelSerializer):
     empresa_nombre = serializers.CharField(source="empresa.nombre", read_only=True)
     role_name = serializers.CharField(source="role.name", read_only=True)
     role_code = serializers.CharField(source="role.code", read_only=True)
+    role_data_scope = serializers.CharField(source="role.data_scope", read_only=True)
 
     class Meta:
         model = UserCompanyProfile
         fields = [
             "id", "user", "user_email", "empresa", "empresa_nombre", "role",
-            "role_name", "role_code", "is_company_admin", "status",
+            "role_name", "role_code", "role_data_scope", "is_company_admin", "status",
             "activated_at", "blocked_at", "block_reason", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class UserDataScopeCompanySerializer(serializers.ModelSerializer):
+    empresa_nombre = serializers.CharField(source="empresa.nombre", read_only=True)
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+
+    class Meta:
+        model = UserDataScopeCompany
+        fields = ["id", "user", "user_email", "empresa", "empresa_nombre", "assigned_by", "created_at"]
+        read_only_fields = ["id", "assigned_by", "created_at"]
 
 
 class UserInvitationSerializer(serializers.ModelSerializer):

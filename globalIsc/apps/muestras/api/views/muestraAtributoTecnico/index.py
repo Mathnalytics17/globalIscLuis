@@ -2,6 +2,7 @@ from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import scope_queryset
 
 from apps.muestras.api.models.muestraAtributoTecnico.index import MuestraAtributoTecnico
 from apps.muestras.api.serializers.muestraAtributoTecnico.index import (
@@ -34,8 +35,7 @@ class MuestraAtributoTecnicoViewSet(ActionPermissionMixin, viewsets.ModelViewSet
         if catalogo:
             queryset = queryset.filter(catalogo_id=catalogo)
         user = self.request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            queryset = queryset.filter(muestra__lote__cliente_empresa=user.empresa)
+        queryset = scope_queryset(queryset, user, "muestra__lote__cliente_empresa_id")
         return queryset
 
     def perform_create(self, serializer):

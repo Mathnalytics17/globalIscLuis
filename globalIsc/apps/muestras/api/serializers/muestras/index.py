@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from apps.muestras.api.models.muestras.index import HistorialMuestra, Muestra
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import can_access_company
 from apps.muestras.api.serializers.muestraAtributoTecnico.index import (
     MuestraAtributoTecnicoSerializer,
     replace_sample_attributes,
@@ -31,10 +32,10 @@ class CreateMuestraSerializer(serializers.ModelSerializer):
         user = getattr(request, "user", None)
         lote = attrs.get("lote") or getattr(self.instance, "lote", None)
         equipo = attrs.get("referencia_equipo") or getattr(self.instance, "referencia_equipo", None)
-        if user and not (user.is_superuser or user.role == User.Role.GLOBAL):
-            if lote and lote.cliente_empresa_id != user.empresa_id:
+        if user:
+            if lote and not can_access_company(user, lote.cliente_empresa_id):
                 raise serializers.ValidationError({"lote": "No tiene acceso a este lote."})
-            if equipo and equipo.empresa_id != user.empresa_id:
+            if equipo and not can_access_company(user, equipo.empresa_id):
                 raise serializers.ValidationError({"referencia_equipo": "No tiene acceso a esta máquina."})
 
         tipo_muestra = attrs.get("tipo_muestra") or getattr(self.instance, "tipo_muestra", None)

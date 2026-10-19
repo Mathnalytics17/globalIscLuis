@@ -10,7 +10,8 @@ from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from apps.misc.api.models.companies.index import Empresa
 from apps.users.api.models.index import User
-from apps.users.api.models.index import SecurityPermission, SecurityRole, UserCompanyProfile
+from apps.users.api.models.index import SecurityPermission, SecurityRole, UserCompanyProfile, UserDataScopeCompany
+from apps.users.api.data_scope import accessible_company_ids, scope_queryset
 from apps.users.api.services import accept_invitation, create_invitation, seed_default_permissions
 from apps.users.api.views.user.index import CurrentUserView
 
@@ -92,6 +93,18 @@ class AccessBaselineCommandTests(TestCase):
         self.assertIn("trazabilidad.ver", admin_codes)
         self.assertIn("importaciones.ver", admin_codes)
         self.assertEqual(SecurityRole.objects.get(code="laboratorista").default_home_path, "/muestras/laboratorio")
+
+    def test_laboratorist_has_the_report_authoring_workflow_not_delivery_decisions(self):
+        seed_default_permissions()
+        labor = SecurityRole.objects.get(code="laboratorista")
+        codes = set(labor.role_permissions.filter(allowed=True).values_list("permission__code", flat=True))
+
+        self.assertTrue({
+            "reportes.ver", "reportes.generar", "reportes.previsualizar",
+            "reportes.subir_firma", "reportes.descargar_pdf", "reportes.ver_versiones",
+        }.issubset(codes))
+        self.assertNotIn("reportes.aprobar", codes)
+        self.assertNotIn("reportes.publicar_cliente", codes)
 
     def test_sample_loader_is_denied_traceability_but_can_open_reports(self):
         with patch.dict(os.environ, {"DEMO_DEFAULT_PASSWORD": "Test-Only-Demo-Password!"}):
@@ -202,3 +215,40 @@ class UserReinvitationLifecycleTests(TestCase):
             UserCompanyProfile.objects.get(user=accepted, empresa=self.company_b).status,
             UserCompanyProfile.Status.ACTIVE,
         )
+
+
+class DataScopeTests(TestCase):
+    def setUp(self):
+        self.company_a = Empresa.objects.create(nombre="Alfa")
+        self.company_b = Empresa.objects.create(nombre="Beta")
+        self.company_c = Empresa.objects.create(nombre="Gamma")
+        self.role = SecurityRole.objects.create(
+            name="Analista multiempresa",
+            code="analista-multiempresa-test",
+            scope=SecurityRole.Scope.INTERNAL,
+            data_scope=SecurityRole.DataScope.ASSIGNED_COMPANIES,
+        )
+        self.user = User.objects.create_user(
+            email="analista@example.com",
+            password="Test-password-123!",
+            empresa=self.company_a,
+            is_active=True,
+        )
+        UserCompanyProfile.objects.create(
+            user=self.user,
+            empresa=self.company_a,
+            role=self.role,
+            status=UserCompanyProfile.Status.ACTIVE,
+        )
+
+    def test_assigned_companies_scope_is_explicit_and_reusable_for_any_queryset(self):
+        UserDataScopeCompany.objects.create(user=self.user, empresa=self.company_b)
+        self.assertEqual(accessible_company_ids(self.user), {self.company_b.id})
+        visible = scope_queryset(Empresa.objects.order_by("id"), self.user, "id")
+        self.assertEqual(list(visible.values_list("id", flat=True)), [self.company_b.id])
+
+    def test_user_override_can_grant_all_companies_without_changing_role_permissions(self):
+        self.user.data_scope_override = SecurityRole.DataScope.ALL_COMPANIES
+        self.user.save(update_fields=["data_scope_override"])
+        self.assertIsNone(accessible_company_ids(self.user))
+        self.assertEqual(scope_queryset(Empresa.objects.all(), self.user, "id").count(), 3)

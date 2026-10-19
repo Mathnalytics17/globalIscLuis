@@ -190,6 +190,16 @@ DEFAULT_ROLE_HOME_PATHS = {
     "revisor_interpretador": "/muestras/revision-resultados",
 }
 
+DEFAULT_ROLE_DATA_SCOPES = {
+    "admin_global": SecurityRole.DataScope.ALL_COMPANIES,
+    "admin_empresa": SecurityRole.DataScope.OWN_COMPANY,
+    "empresa_consulta": SecurityRole.DataScope.OWN_COMPANY,
+    "solo_lectura": SecurityRole.DataScope.OWN_COMPANY,
+    "empresa_carga_muestras": SecurityRole.DataScope.OWN_COMPANY,
+    "laboratorista": SecurityRole.DataScope.ALL_COMPANIES,
+    "revisor_interpretador": SecurityRole.DataScope.ALL_COMPANIES,
+}
+
 
 READONLY_PREFIXES = [
     "activos.ver",
@@ -302,6 +312,16 @@ LAB_CODES = [
     "resultados.importar",
     "resultados.exportar",
     "revision.ver",
+    # El laboratorista prepara el informe que nace de los resultados que
+    # cargó. La aprobación, publicación y envío siguen separados en el rol
+    # de revisión/entrega.
+    "reportes.ver",
+    "reportes.generar",
+    "reportes.previsualizar",
+    "reportes.descargar_pdf",
+    "reportes.subir_firma",
+    "reportes.ver_versiones",
+    "reportes.ver_dashboard",
 ]
 
 REVIEWER_CODES = [
@@ -360,6 +380,7 @@ def sync_default_roles_and_permissions():
                 "scope": scope,
                 "legacy_role": legacy_role,
                 "default_home_path": DEFAULT_ROLE_HOME_PATHS.get(code, ""),
+                "data_scope": DEFAULT_ROLE_DATA_SCOPES.get(code, SecurityRole.DataScope.OWN_COMPANY),
                 "editable": code != "admin_global",
                 "active": True,
             },

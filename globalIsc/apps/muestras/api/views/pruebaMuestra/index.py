@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import scope_queryset
 from apps.muestras.services.operational_audit import record_operational_event
 
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
@@ -59,8 +60,7 @@ class PruebaMuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            queryset = queryset.filter(muestra__lote__cliente_empresa=user.empresa)
+        queryset = scope_queryset(queryset, user, "muestra__lote__cliente_empresa_id")
         lote_id = self.request.query_params.get("lote")
         muestra_id = self.request.query_params.get("muestra")
         estado_asignacion = self.request.query_params.get("estado_asignacion")
@@ -172,8 +172,7 @@ class PruebaMuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
         lote_queryset = LoteMuestras.objects.prefetch_related('muestras')
         user = request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            lote_queryset = lote_queryset.filter(cliente_empresa=user.empresa)
+        lote_queryset = scope_queryset(lote_queryset, user, "cliente_empresa_id")
         lote = get_object_or_404(lote_queryset, pk=data['lote_id'])
         require_batch_operation(lote, "asignar_pruebas")
         sample_ids = data.get('sample_ids') or []

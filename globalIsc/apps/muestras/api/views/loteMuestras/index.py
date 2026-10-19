@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from apps.utils.pagination import StandardResultsSetPagination
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.users.api.models.index import User
+from apps.users.api.data_scope import scope_queryset
 from apps.users.api.services import audit_user_action
 from django.utils import timezone
 from apps.muestras.api.models.auditoria import EventoAuditoriaOperativa
@@ -142,8 +143,7 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         )
 
         user = self.request.user
-        if not (user.is_superuser or user.role == User.Role.GLOBAL):
-            queryset = queryset.filter(cliente_empresa=user.empresa)
+        queryset = scope_queryset(queryset, user, "cliente_empresa_id")
 
         if self.action in ["retrieve", "recalcular_estado"]:
             resultados_queryset = (
