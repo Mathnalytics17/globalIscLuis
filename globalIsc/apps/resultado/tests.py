@@ -25,7 +25,7 @@ from apps.muestras.api.models.muestraAtributoTecnico.index import MuestraAtribut
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
 from apps.resultado.api.models.index import HistoricoResultado, Resultado, VersionInterpretacion
 from apps.muestras.api.models.auditoria import EventoAuditoriaOperativa
-from apps.resultado.api.views.index import _sample_review_status
+from apps.resultado.api.views.index import _build_predefined_comments, _sample_review_status
 from apps.users.api.models.index import User
 
 
@@ -75,6 +75,87 @@ class ResultEntryTests(TestCase):
         ]
 
         self.assertEqual(_sample_review_status(self.muestra, tests), "Crítica")
+
+    def test_predefined_comments_only_come_from_technical_field_configuration(self):
+        source = PruebaFuenteLimite.objects.create(
+            prueba=self.prueba,
+            tipo_limite="global",
+        )
+        normal_field = PruebaLimiteCampo.objects.create(
+            fuente_limite=source,
+            nombre="Valor normal",
+            codigo="valor_normal",
+            comentario_normal="Texto normal configurado.",
+        )
+        warning_field = PruebaLimiteCampo.objects.create(
+            fuente_limite=source,
+            nombre="Valor fuera",
+            codigo="valor_fuera",
+            comentario_fuera_limite="Texto de seguimiento configurado.",
+        )
+        no_text_field = PruebaLimiteCampo.objects.create(
+            fuente_limite=source,
+            nombre="Sin texto",
+            codigo="sin_texto",
+        )
+
+        comments = _build_predefined_comments([{
+            "evaluacion_limite": {
+                "details": [
+                    {"field_id": normal_field.id, "estado": "NORMAL"},
+                    {"field_id": warning_field.id, "estado": "CRITICO"},
+                    {"field_id": no_text_field.id, "estado": "NORMAL"},
+                ],
+            },
+        }])
+
+        self.assertEqual(comments, [
+            "Texto normal configurado.",
+            "Texto de seguimiento configurado.",
+        ])
+
+    def test_invalidated_result_has_priority_over_stale_review_flags(self):
+        tests = [
+            {
+                "estado_tecnico": "CRITICO",
+                "is_revisada": True,
+                "resultado": {"id": 999, "estatus": "rechazado"},
+            },
+        ]
+
+        self.assertEqual(_sample_review_status(self.muestra, tests), "Requiere corrección")
+
+    def test_invalidating_result_unreviews_and_blocks_the_sample(self):
+        self.sample_test.completada = True
+        self.sample_test.is_revisada = True
+        self.sample_test.estatus = "aprobado"
+        self.sample_test.save(update_fields=["completada", "is_revisada", "estatus"])
+        self.muestra.is_resultado_ingresado = True
+        self.muestra.is_revisado = True
+        self.muestra.save(update_fields=["is_resultado_ingresado", "is_revisado"])
+        result = Resultado.objects.create(
+            prueba_muestra=self.sample_test,
+            resultado=json.dumps({"values": [{"key": "valor", "value": "12"}]}),
+            fecha_medicion=timezone.now(),
+            usuario_medicion=self.user,
+            estatus="aprobado",
+        )
+
+        response = self.client.post(
+            f"/api/lubrication/results/{result.id}/invalidate/",
+            {"reason": "Control de calidad."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.sample_test.refresh_from_db()
+        self.muestra.refresh_from_db()
+        self.assertEqual(self.sample_test.estatus, "rechazado")
+        self.assertFalse(self.sample_test.completada)
+        self.assertFalse(self.sample_test.is_revisada)
+        self.assertFalse(self.muestra.is_resultado_ingresado)
+        self.assertFalse(self.muestra.is_revisado)
+        self.assertEqual(self.muestra.campos_adicionales["interpretacion"]["estado"], "requiere_revision")
 
     def test_consolidated_export_accepts_timezone_aware_sample_date(self):
         response = self.client.get(
@@ -300,6 +381,52 @@ class ResultEntryTests(TestCase):
         result = Resultado.objects.get(prueba_muestra=self.sample_test)
         self.assertEqual(result.estatus, "preliminar")
 
+    def test_repeating_the_same_correction_confirmation_is_idempotent(self):
+        reviewed_test = Prueba.objects.create(
+            nombre_variable="Ensayo ya revisado",
+            acronimo="REVIEWED",
+        )
+        PruebaMuestra.objects.create(
+            muestra=self.muestra,
+            prueba=reviewed_test,
+            usuario_solicitud=self.user,
+            completada=True,
+            is_revisada=True,
+            estatus="aprobado",
+        )
+        Resultado.objects.create(
+            prueba_muestra=self.sample_test,
+            resultado=json.dumps({"values": []}),
+            fecha_medicion=timezone.now(),
+            usuario_medicion=self.user,
+            estatus="rechazado",
+        )
+        self.sample_test.estatus = "rechazado"
+        self.sample_test.save(update_fields=["estatus"])
+        form = self.client.get(
+            f"/api/lubrication/result-entry/sample-tests/{self.sample_test.id}/form/"
+        )
+        field_key = form.data["fields"][0]["key"]
+        payload = {
+            "idempotency_key": "correccion-repetida-1",
+            "values": [{"key": field_key, "value": "12.5", "observacion": ""}],
+        }
+
+        first = self.client.post(
+            f"/api/lubrication/result-entry/sample-tests/{self.sample_test.id}/confirm/",
+            payload,
+            format="json",
+        )
+        repeated = self.client.post(
+            f"/api/lubrication/result-entry/sample-tests/{self.sample_test.id}/confirm/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 200, first.data)
+        self.assertEqual(repeated.status_code, 200, repeated.data)
+        self.assertTrue(repeated.data["idempotent"])
+
     def test_interpretation_trends_orders_by_existing_test_fields(self):
         form = self.client.get(
             f"/api/lubrication/result-entry/sample-tests/{self.sample_test.id}/form/"
@@ -321,6 +448,9 @@ class ResultEntryTests(TestCase):
         self.assertIn("groups", response.data)
 
     def test_saving_interpretation_creates_an_immutable_version_and_event(self):
+        # La interpretación solo se guarda después de revisar todos los ensayos.
+        self.muestra.is_revisado = True
+        self.muestra.save(update_fields=["is_revisado"])
         response = self.client.patch(
             f"/api/lubrication/interpretation/samples/{self.muestra.id}/",
             {

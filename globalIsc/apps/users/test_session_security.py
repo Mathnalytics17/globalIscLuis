@@ -51,6 +51,13 @@ class TestBrowserSessionSecurity:
         assert "globaloil_session" in self.client.cookies
         assert self.client.get("/api/users/me/").status_code == 200
         assert UserAuditLog.objects.filter(action="auth.login_succeeded", target_user=self.user).exists()
+        self.user.refresh_from_db()
+        assert self.user.last_login is not None
+
+        # The timestamp is included in the profile/login payload.  The company
+        # directory itself is intentionally protected by its own RBAC permission.
+        assert response.data["user"]["last_login"] is not None
+        assert self.client.get("/api/users/").status_code == 403
 
     def test_unauthenticated_api_is_401_and_post_without_csrf_is_403(self):
         assert self.client.get("/api/users/me/").status_code == 401
@@ -96,7 +103,9 @@ class TestBrowserSessionSecurity:
         assert self.login().status_code == 200
         revoke_user_sessions(self.user)
 
-        assert self.client.get("/api/users/me/").status_code == 401
+        response = self.client.get("/api/users/me/")
+        assert response.status_code == 401
+        assert response.headers["X-Session-Expired"] == "1"
 
     def test_user_cannot_elevate_own_role_or_access_status(self):
         self.client.force_authenticate(user=self.user)

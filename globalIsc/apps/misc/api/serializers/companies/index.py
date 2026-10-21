@@ -19,6 +19,10 @@ class EmpresaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Empresa
         fields = '__all__'
+        # The internal Global Oil company is established by the platform. It
+        # must be visible to user administration but cannot be reclassified
+        # into a customer from an ordinary company form.
+        read_only_fields = ('is_internal',)
 
     def to_internal_value(self, data):
         if hasattr(data, 'copy'):

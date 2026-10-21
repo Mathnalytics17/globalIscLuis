@@ -4,11 +4,12 @@ from io import BytesIO
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.worksheet.datavalidation import DataValidation
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Max
 from django.utils.text import slugify
 from django.utils import timezone
-from rest_framework import filters, status, viewsets
+from rest_framework import filters, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -39,6 +40,7 @@ from apps.misc.api.serializers.dynamicTechnicalConfig.index import (
     CatalogoTecnicoSerializer,
     CatalogoTecnicoVersionSerializer,
     CampoTecnicoMuestraSerializer,
+    CampoTecnicoMuestraSampleFormSerializer,
     EscalaComparacionItemSerializer,
     EscalaComparacionSerializer,
     PruebaFuenteLimiteSerializer,
@@ -186,6 +188,8 @@ class CatalogoTecnicoViewSet(SoftDeleteViewSet):
             activo=True,
             deleted_at__isnull=True,
             visible_en_ingreso=True,
+            catalogo__activo=True,
+            catalogo__deleted_at__isnull=True,
         ).select_related("catalogo").prefetch_related("catalogo__campos", "catalogo__items__valores")
         if tipo:
             fields = fields.filter(
@@ -193,7 +197,7 @@ class CatalogoTecnicoViewSet(SoftDeleteViewSet):
                 catalogo__tipo_muestra__in=[tipo, "ambos"],
             )
         fields = fields.order_by("tipo_muestra", "orden", "nombre_visible")
-        return Response(CampoTecnicoMuestraSerializer(fields, many=True).data)
+        return Response(CampoTecnicoMuestraSampleFormSerializer(fields, many=True).data)
 
 
 class CatalogoTecnicoVersionViewSet(SoftDeleteViewSet):
@@ -202,6 +206,8 @@ class CatalogoTecnicoVersionViewSet(SoftDeleteViewSet):
         "create": "catalogos_tecnicos.crear", "update": "catalogos_tecnicos.editar",
         "partial_update": "catalogos_tecnicos.editar", "destroy": "catalogos_tecnicos.eliminar",
         "restore": "catalogos_tecnicos.restaurar",
+        "make_current": "catalogos_tecnicos.editar",
+        "deactivate": "catalogos_tecnicos.editar",
     }
     serializer_class = CatalogoTecnicoVersionSerializer
     search_fields = ["nombre", "norma_referencia", "notas"]
@@ -216,6 +222,8 @@ class CatalogoTecnicoVersionViewSet(SoftDeleteViewSet):
     @transaction.atomic
     def perform_create(self, serializer):
         catalogo = serializer.validated_data["catalogo"]
+        if not catalogo.activo or catalogo.deleted_at is not None:
+            raise serializers.ValidationError({"catalogo": "Active el catálogo antes de crear una nueva versión."})
         # A technical version represents an immutable edition of the catalog.
         # The first implementation only changed ``version_actual`` and left the
         # new edition without items. Besides being surprising for the user, it
@@ -264,9 +272,6 @@ class CatalogoTecnicoVersionViewSet(SoftDeleteViewSet):
                     for valor in item_origen.valores.all()
                 ])
 
-        catalogo.version_actual = version
-        catalogo.save(update_fields=["version_actual", "updated_at"])
-
         # Used by the audit event created by the base ViewSet. The reference is
         # deliberately human-readable so Trazabilidad can explain the lineage
         # without exposing raw IDs.
@@ -297,10 +302,72 @@ class CatalogoTecnicoVersionViewSet(SoftDeleteViewSet):
 
     @transaction.atomic
     def perform_update(self, serializer):
-        version = serializer.save()
-        if self.request.data.get("hacer_actual") in [True, "true", "True", "1"]:
-            version.catalogo.version_actual = version
-            version.catalogo.save(update_fields=["version_actual", "updated_at"])
+        serializer.save()
+
+    @action(detail=True, methods=["post"], url_path="make-current")
+    @transaction.atomic
+    def make_current(self, request, pk=None):
+        """Select the active edition used by new operational records.
+
+        Creating an edition preserves the current one.  This deliberate action
+        prevents an unfinished draft from silently becoming the catalog used by
+        sample entry, limits or imports.
+        """
+        version = self.get_object()
+        if not version.activo or version.deleted_at is not None:
+            return Response(
+                {"detail": "Solo una versión activa puede usarse como versión actual."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        catalogo = version.catalogo
+        if not catalogo.activo or catalogo.deleted_at is not None:
+            return Response(
+                {"detail": "Active el catálogo antes de seleccionar una versión actual."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        anterior = catalogo.version_actual
+        catalogo.version_actual = version
+        catalogo.save(update_fields=["version_actual", "updated_at"])
+        self._record_configuration_event(
+            instance=version,
+            action="catalogos.version_actualizada",
+            detail="Versión seleccionada como vigente para el catálogo.",
+            before={"version_actual": getattr(anterior, "numero", None)},
+            after={"version_actual": version.numero},
+        )
+        return Response(self.get_serializer(version).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    @transaction.atomic
+    def deactivate(self, request, pk=None):
+        """Deactivate a historical edition without modifying the catalog itself."""
+        version = self.get_object()
+        if version.catalogo.version_actual_id == version.id:
+            return Response(
+                {"detail": "No puede desactivar la versión actual. Seleccione primero otra versión activa."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if version.activo:
+            before = self._audit_snapshot(version)
+            version.activo = False
+            version.save(update_fields=["activo", "updated_at"])
+            self._record_configuration_event(
+                instance=version,
+                action="catalogos.version_desactivada",
+                detail="Versión histórica desactivada sin alterar el catálogo.",
+                before=before,
+                after=self._audit_snapshot(version),
+            )
+        return Response(self.get_serializer(version).data, status=status.HTTP_200_OK)
+
+    def destroy(self, request, *args, **kwargs):
+        version = self.get_object()
+        if version.catalogo.version_actual_id == version.id:
+            return Response(
+                {"detail": "No puede eliminar la versión actual. Seleccione primero otra versión activa."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class CampoTecnicoMuestraViewSet(SoftDeleteViewSet):
@@ -396,6 +463,11 @@ class CatalogoTecnicoItemViewSet(SoftDeleteViewSet):
             return Response({"detail": "El archivo no puede superar 10 MB."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             version = CatalogoTecnicoVersion.objects.select_related("catalogo").get(pk=version_id, deleted_at__isnull=True)
+            if not version.activo or not version.catalogo.activo or version.catalogo.deleted_at is not None:
+                return Response(
+                    {"detail": "Active el catálogo y la versión antes de importar ítems."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             workbook = load_workbook(BytesIO(upload.read()), read_only=True, data_only=True)
             if len(workbook.worksheets) > 20:
                 return Response({"detail": "El archivo no puede tener más de 20 hojas."}, status=status.HTTP_400_BAD_REQUEST)
@@ -714,6 +786,21 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
                 rule = (criterion.valores_limite or {}).get(field.get("codigo"), {})
                 if not isinstance(rule, dict): rule = {"valor_esperado": rule}
                 sheet.append([criterion.codigo, field.get("codigo"), rule.get("operador", field.get("operador", "max")), "SI" if rule.get("usar_amarillo") else "NO", rule.get("min_critico", "NA"), rule.get("min_aceptable", "NA"), rule.get("max_aceptable", "NA"), rule.get("max_critico", "NA"), rule.get("valor_esperado", "NA"), "NA", ""])
+        if sheet.max_row > 1:
+            operations_validation = DataValidation(
+                type="list",
+                formula1='"max,min,between,eq,neq,in,not_in,informativo"',
+                allow_blank=False,
+            )
+            operations_validation.promptTitle = "Operación de límite"
+            operations_validation.prompt = "max: máximo; min: mínimo; between: rango; eq: igual; neq: diferente; in: en lista; not_in: fuera de lista; informativo: no evalúa."
+            operations_validation.errorTitle = "Operación no válida"
+            operations_validation.error = "Seleccione una operación de la lista."
+            operations_validation.errorStyle = "stop"
+            operations_validation.showErrorMessage = True
+            operations_validation.showInputMessage = True
+            sheet.add_data_validation(operations_validation)
+            operations_validation.add(f"C2:C{sheet.max_row}")
         sheet.freeze_panes = "A2"
         for col, width in zip("ABCDEFGHIJK", [26, 28, 16, 16, 18, 18, 18, 18, 22, 28, 38]): sheet.column_dimensions[col].width = width
         guide = workbook.create_sheet("Guía")
@@ -725,7 +812,7 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
         guidance = [
             ("criterio_codigo", "Código de la combinación de catálogo; no lo modifique.", "Siempre"),
             ("campo_codigo", "Código técnico del campo; no lo modifique.", "Siempre"),
-            ("operacion", "max, min, between, eq, neq, in, not_in o informativo.", "Siempre"),
+            ("operacion", "Seleccione desde la lista: max = máximo (≤), min = mínimo (≥), between = rango, eq = igual, neq = diferente, in = en lista, not_in = fuera de lista, informativo = no evalúa.", "Siempre"),
             ("usa_semaforo", "SI para advertencia amarilla; NO para pasar de aceptable a crítico.", "Operaciones max, min o between"),
             ("min_critico / min_aceptable", "Límites inferiores. Use NA cuando no apliquen.", "min o between"),
             ("max_aceptable / max_critico", "Límites superiores. El valor 0 es válido. Use NA cuando no aplique.", "max o between"),
@@ -767,11 +854,21 @@ class PruebaFuenteLimiteViewSet(SoftDeleteViewSet):
                     return None
                 text = str(raw).strip()
                 return None if text.upper() in {"", "NA"} else text
-            rule={"operador": operation, "usar_amarillo": str(row[pos["usa_semaforo"]] or "").strip().upper() == "SI", "min_critico": val("min_critico"), "min_aceptable": val("min_aceptable"), "max_aceptable": val("max_aceptable"), "max_critico": val("max_critico"), "valor_esperado": val("valor_objetivo") or val("valores_permitidos")}
-            needed = {"max":["max_aceptable"], "min":["min_aceptable"], "between":["min_aceptable","max_aceptable"], "eq":["valor_esperado"], "neq":["valor_esperado"], "in":["valor_esperado"], "not_in":["valor_esperado"], "informativo":[]}[operation]
-            if any(rule[key] is None for key in needed):
-                missing = ", ".join(key for key in needed if rule[key] is None)
-                errors.append({"fila": row_number, "columna": missing, "error": f"Complete: {missing}."}); continue
+            rule={"operador": operation, "usar_amarillo": str(row[pos["usa_semaforo"]] or "").strip().upper() in {"SI", "SÍ", "TRUE", "1"}, "min_critico": val("min_critico"), "min_aceptable": val("min_aceptable"), "max_aceptable": val("max_aceptable"), "max_critico": val("max_critico"), "valor_esperado": val("valor_objetivo") or val("valores_permitidos")}
+            # Only threshold operations have a yellow band.  A value/list rule
+            # is binary, so keeping a stray SI from Excel would make its JSON
+            # contradict both the evaluator and the editor.
+            if operation not in {"max", "min", "between"}:
+                rule["usar_amarillo"] = False
+            try:
+                _validate_semaphore_rule(
+                    rule,
+                    f"Fila {row_number} / {fields[field_code].get('nombre') or field_code}",
+                    fields[field_code],
+                )
+            except ValueError as error:
+                errors.append({"fila": row_number, "error": str(error)})
+                continue
             updates.append((criteria[code], field_code, rule))
         if errors: transaction.set_rollback(True); return Response({"detail":"La importación no se aplicó.","errores":errors[:100]}, status=status.HTTP_400_BAD_REQUEST)
         for criterion, field_code, rule in updates:
@@ -1292,6 +1389,8 @@ def _validate_semaphore_rule(rule, label, field_config=None):
         "max": ["max_aceptable", "max_critico"] if yellow else ["max_aceptable"],
         "eq": ["valor_esperado"],
         "neq": ["valor_esperado"],
+        "in": ["valor_esperado"],
+        "not_in": ["valor_esperado"],
     }.get(operator, [])
     missing = [key for key in required if rule.get(key) in [None, ""]]
     if missing:

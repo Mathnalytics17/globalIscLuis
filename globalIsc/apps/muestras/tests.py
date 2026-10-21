@@ -8,11 +8,12 @@ from backend.api_exceptions import api_exception_handler
 
 from apps.misc.api.models.companies.index import Empresa
 from apps.activesTree.api.models.machines.index import Maquina
-from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, Carpeta, PuntoMuestreo
+from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, Carpeta, Lubricante, PuntoMuestreo
 from apps.misc.api.models.tipoGestionMuestra.index import TipoGestionMuestra
 from apps.misc.api.models.dynamicTechnicalConfig.index import (
     CatalogoTecnico,
     CatalogoTecnicoItem,
+    CatalogoTecnicoVersion,
     CampoTecnicoMuestra,
     PruebaFuenteLimite,
     PruebaLimiteCampo,
@@ -582,6 +583,67 @@ class FixedSampleBatchExcelTests(TestCase):
         headers = [cell.value for cell in workbook["Aceites"][1]]
 
         self.assertIn("Grado de viscosidad", headers)
+
+    def test_template_uses_only_the_current_catalog_edition(self):
+        old_version = CatalogoTecnicoVersion.objects.create(catalogo=self.catalog, numero=1, nombre="Edición anterior")
+        current_version = CatalogoTecnicoVersion.objects.create(catalogo=self.catalog, numero=2, nombre="Edición vigente")
+        self.catalog.version_actual = current_version
+        self.catalog.save(update_fields=["version_actual"])
+        self.item.version = current_version
+        self.item.save(update_fields=["version"])
+        historical_duplicate = CatalogoTecnicoItem.objects.create(
+            catalogo=self.catalog,
+            version=old_version,
+            nombre=self.item.nombre,
+            codigo="sae_70w_90_historico",
+        )
+
+        workbook = generate_template_workbook(self.token)
+        catalog_ws = workbook["_CATALOGOS"]
+        headers = {cell.value: cell.column for cell in catalog_ws[1]}
+        values = [value for value in catalog_ws.iter_cols(
+            min_col=headers[f"tecnico_{self.field.id}"],
+            max_col=headers[f"tecnico_{self.field.id}"],
+            min_row=2,
+            values_only=True,
+        ).__next__() if value]
+
+        self.assertIn(f"{self.item.id} | {self.item.nombre}", values)
+        self.assertNotIn(f"{historical_duplicate.id} | {historical_duplicate.nombre}", values)
+
+    def test_template_offers_registered_lubricants_and_uses_their_identity(self):
+        lubricant = Lubricante.objects.create(
+            nombre="Aceite hidráulico 68",
+            fabricante="Mobil",
+            referencia="DTE 25 Ultra",
+        )
+        workbook = generate_template_workbook(self.token)
+        ws = workbook["Aceites"]
+        columns = template_columns("aceite")
+        index = {key: position for position, (key, _) in enumerate(columns, start=1)}
+
+        self.assertIn("Lubricante registrado", [cell.value for cell in ws[1]])
+        catalog_ws = workbook["_CATALOGOS"]
+        catalog_headers = {cell.value: cell.column for cell in catalog_ws[1]}
+        lubricant_values = [value for value in catalog_ws.iter_cols(
+            min_col=catalog_headers["Lubricantes"],
+            max_col=catalog_headers["Lubricantes"],
+            min_row=2,
+            values_only=True,
+        ).__next__() if value]
+        self.assertIn(f"{lubricant.id} | Mobil · DTE 25 Ultra", lubricant_values)
+
+        ws.cell(2, index["fecha_toma"], timezone.now())
+        ws.cell(2, index["condicion"], "nueva")
+        ws.cell(2, index["lubricante_catalogo"], f"{lubricant.id} | Mobil · DTE 25 Ultra")
+        ws.cell(2, index[f"tecnico_{self.field.id}"], f"{self.item.id} | {self.item.nombre}")
+
+        data, errors = parse_row(ws, 2, "aceite", technical_fields_by_type())
+
+        self.assertEqual(errors, [])
+        self.assertEqual(data["lubricante_catalogo"], str(lubricant.id))
+        self.assertEqual(data["fabricante"], "Mobil")
+        self.assertEqual(data["referencia_marca"], "DTE 25 Ultra")
 
     def test_fixed_catalog_value_is_parsed_as_sample_attribute(self):
         workbook = generate_template_workbook(self.token)

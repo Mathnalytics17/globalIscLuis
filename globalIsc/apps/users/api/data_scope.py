@@ -55,3 +55,36 @@ def can_access_company(user, company_id):
         return effective_data_scope(user) == SecurityRole.DataScope.ALL_COMPANIES
     company_ids = accessible_company_ids(user)
     return company_ids is None or int(company_id) in company_ids
+
+
+def is_company_audience_user(user):
+    """Whether a user consumes information as a customer company.
+
+    This is deliberately independent from the data scope.  A Global Oil
+    analyst may have access to one assigned company and still needs to see its
+    unpublished work. Conversely, an administrator of that company must only
+    see reports explicitly released to the customer.
+    """
+    if not user or not getattr(user, "is_authenticated", False):
+        return True
+    if user.is_superuser or user.role == User.Role.GLOBAL:
+        return False
+
+    profile = active_role_for(user)
+    if profile and profile.role_id:
+        return profile.role.scope == SecurityRole.Scope.COMPANY
+
+    # Compatibility for users created before SecurityRole/UserCompanyProfile.
+    return user.role in [User.Role.ADMIN, User.Role.EMPRESA]
+
+
+def scope_released_reports_queryset(queryset, user, company_lookup):
+    """Apply tenant scope plus the customer-publication boundary to reports."""
+    queryset = scope_queryset(queryset, user, company_lookup)
+    if is_company_audience_user(user):
+        queryset = queryset.filter(
+            visible_cliente=True,
+            fecha_aprobacion__isnull=False,
+            usuario_aprobacion__isnull=False,
+        ).exclude(estatus="anulado")
+    return queryset

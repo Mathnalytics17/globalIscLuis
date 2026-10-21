@@ -31,6 +31,14 @@ class EmpresaViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         user = self.request.user
         if user.is_superuser or user.role == User.Role.GLOBAL:
+            # Global Oil is an internal operational tenant.  It must be opted
+            # into explicitly by security screens, otherwise generic company
+            # pickers would incorrectly offer it as a client.
+            if (
+                self.action in {"list", "estadisticas", "buscar"}
+                and str(self.request.query_params.get("include_internal", "")).lower() not in {"1", "true", "yes"}
+            ):
+                return queryset.filter(is_internal=False)
             return queryset
         return queryset.filter(id=user.empresa_id)
 
@@ -115,6 +123,11 @@ class EmpresaViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         self._require_company_permission("empresas.eliminar")
         empresa = self.get_object()
+        if empresa.is_internal:
+            return Response(
+                {"detail": "Global Oil es la empresa interna del sistema y no puede desactivarse ni eliminarse."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         empresa.is_active = False
         empresa.status = Empresa.Status.INACTIVE
         empresa.save(update_fields=["is_active", "status"])

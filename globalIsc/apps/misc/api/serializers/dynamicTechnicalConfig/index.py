@@ -75,6 +75,10 @@ class CatalogoTecnicoItemSerializer(serializers.ModelSerializer):
         catalogo = attrs.get("catalogo") or getattr(self.instance, "catalogo", None)
         if version and catalogo and version.catalogo_id != catalogo.id:
             raise serializers.ValidationError({"version": "La versión debe pertenecer al catálogo seleccionado."})
+        if catalogo and (not catalogo.activo or catalogo.deleted_at is not None):
+            raise serializers.ValidationError({"catalogo": "Active el catálogo antes de modificar sus ítems."})
+        if version and (not version.activo or version.deleted_at is not None):
+            raise serializers.ValidationError({"version": "Active la versión antes de modificar sus ítems."})
         return attrs
 
     @transaction.atomic
@@ -117,6 +121,22 @@ class CatalogoTecnicoSerializer(serializers.ModelSerializer):
         return slugify(value or "").replace("-", "_")
 
 
+class CatalogoTecnicoSampleFormSerializer(CatalogoTecnicoSerializer):
+    """Catalog contract for intake fields: only the current edition is valid.
+
+    A catalog keeps historical versions for traceability.  Returning all their
+    items in a select made cloned historical rows appear as duplicated options.
+    """
+
+    items = serializers.SerializerMethodField()
+
+    def get_items(self, catalogo):
+        items = catalogo.items.filter(deleted_at__isnull=True)
+        if catalogo.version_actual_id:
+            items = items.filter(version_id=catalogo.version_actual_id)
+        return CatalogoTecnicoItemSerializer(items, many=True, context=self.context).data
+
+
 class CampoTecnicoMuestraSerializer(serializers.ModelSerializer):
     catalogo_info = CatalogoTecnicoSerializer(source="catalogo", read_only=True)
 
@@ -132,8 +152,24 @@ class CampoTecnicoMuestraSerializer(serializers.ModelSerializer):
         instance = self.instance or CampoTecnicoMuestra()
         for field, value in attrs.items():
             setattr(instance, field, value)
+        catalogo = instance.catalogo
+        tipo_muestra = instance.tipo_muestra
+        if not catalogo.activo or catalogo.deleted_at is not None:
+            raise serializers.ValidationError({"catalogo": "El catálogo asociado debe estar activo."})
+        if tipo_muestra == "ambos":
+            compatible = catalogo.tipo_muestra == "ambos"
+        else:
+            compatible = catalogo.tipo_muestra in {tipo_muestra, "ambos"}
+        if not compatible:
+            raise serializers.ValidationError({
+                "catalogo": "El catálogo debe aplicar al mismo tipo de muestra que el campo, o ser general.",
+            })
         run_model_validation(instance)
         return attrs
+
+
+class CampoTecnicoMuestraSampleFormSerializer(CampoTecnicoMuestraSerializer):
+    catalogo_info = CatalogoTecnicoSampleFormSerializer(source="catalogo", read_only=True)
 
 
 class EscalaComparacionItemSerializer(serializers.ModelSerializer):

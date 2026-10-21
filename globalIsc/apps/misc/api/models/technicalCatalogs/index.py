@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models.functions import Lower
 
 
 class EquipoPrueba(models.Model):
@@ -16,9 +17,37 @@ class EquipoPrueba(models.Model):
         return f"{self.codigo} - {self.nombre}"
 
 
+class CategoriaUnidad(models.Model):
+    """Controlled classifications used by measurement units."""
+
+    nombre = models.CharField(max_length=80)
+    descripcion = models.TextField(blank=True, null=True)
+    activo = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["nombre"]
+        constraints = [
+            models.UniqueConstraint(Lower("nombre"), name="misc_categoria_unidad_nombre_ci_unique"),
+        ]
+
+    def __str__(self):
+        return self.nombre
+
+
 class Unidad(models.Model):
     nombre = models.CharField(max_length=100)
     simbolo = models.CharField(max_length=25, unique=True)
+    categoria = models.ForeignKey(
+        CategoriaUnidad,
+        on_delete=models.PROTECT,
+        related_name="unidades",
+        null=True,
+        blank=True,
+    )
+    # Kept as a denormalized compatibility label for legacy exports and API
+    # consumers. New writes must select `categoria`; serializers synchronize it.
     magnitud = models.CharField(max_length=80, blank=True, null=True)
     descripcion = models.TextField(blank=True, null=True)
     activo = models.BooleanField(default=True)
@@ -56,6 +85,15 @@ class MetodoEquipo(models.Model):
 
 class Condicion(models.Model):
     nombre = models.CharField(max_length=100)
+    magnitud_categoria = models.ForeignKey(
+        CategoriaUnidad,
+        on_delete=models.PROTECT,
+        related_name="condiciones",
+        null=True,
+        blank=True,
+    )
+    # Compatibility label for existing reports and integrations. New writes
+    # select `magnitud_categoria`; serializers keep this value synchronized.
     magnitud = models.CharField(max_length=80, default="temperatura")
     valor = models.DecimalField(max_digits=12, decimal_places=4)
     unidad = models.ForeignKey(

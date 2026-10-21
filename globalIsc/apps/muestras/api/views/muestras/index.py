@@ -166,6 +166,13 @@ class MuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         reason = str(request.data.get("reason") or "").strip()
         if not reason:
             return Response({"reason": ["Indique el motivo de invalidación."]}, status=status.HTTP_400_BAD_REQUEST)
+        # Invalidar una muestra también retira TODOS sus reportes publicados.
+        # La operación es atómica: nunca puede quedar invalidada con informes visibles.
+        from apps.reporte.api.models.index import Reporte
+        with transaction.atomic():
+            return self._invalidate_with_reports(request, muestra, reason)
+
+    def _invalidate_with_reports(self, request, muestra, reason):
         muestra.estado_operativo = "invalidada"
         muestra.motivo_invalidacion = reason
         muestra.fecha_invalidacion = timezone.now()
@@ -184,8 +191,26 @@ class MuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             before={"estado_operativo": "activa"},
             after={"estado_operativo": "invalidada"},
         )
+        from apps.reporte.api.models.index import Reporte
+        for reporte in Reporte.objects.select_for_update().filter(muestra=muestra).exclude(estatus="anulado"):
+            old_status, old_visible = reporte.estatus, reporte.visible_cliente
+            reporte.estatus = "anulado"
+            reporte.visible_cliente = False
+            reporte.notas_internas = "\n".join(filter(None, [
+                reporte.notas_internas, f"[Anulado por invalidación de muestra] {reason}",
+            ]))
+            reporte.save(update_fields=["estatus", "visible_cliente", "notas_internas"])
+            record_operational_event(
+                actor=request.user, action="reporte.anulado_por_muestra_invalidada",
+                entity_type="reporte", entity_id=reporte.id,
+                entity_label=f"{reporte.consecutivo} v{reporte.version}",
+                lote=reporte.lote, muestra=muestra, reporte=reporte,
+                detail="Reporte retirado por invalidación de muestra.", reason=reason,
+                before={"estatus": old_status, "visible_cliente": old_visible},
+                after={"estatus": "anulado", "visible_cliente": False},
+            )
         if muestra.lote:
-            muestra.lote.recalcular_estado()
+            muestra.lote.recalcular_estado(save=True)
         return Response(MuestraSerializer(muestra, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="reactivate")

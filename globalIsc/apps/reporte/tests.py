@@ -21,7 +21,7 @@ from apps.reporte.api.views.index import (
     _report_limit_bands,
     _report_status,
 )
-from apps.users.api.models.index import User
+from apps.users.api.models.index import SecurityRole, User, UserCompanyProfile
 
 
 class ReportSemaphoreTests(SimpleTestCase):
@@ -227,6 +227,75 @@ class ReportEmailTests(TestCase):
 
         self.assertTrue(view._tenant_samples_queryset().filter(pk=self.sample.pk).exists())
         self.assertFalse(view._tenant_samples_queryset().filter(pk=other_sample.pk).exists())
+
+    def test_company_audience_only_sees_released_reports(self):
+        """Publication is a boundary separate from the user's data scope."""
+        company_role = SecurityRole.objects.create(
+            name="Consulta cliente de prueba",
+            code="consulta-cliente-prueba",
+            scope=SecurityRole.Scope.COMPANY,
+            data_scope=SecurityRole.DataScope.OWN_COMPANY,
+        )
+        customer_user = User.objects.create_user(
+            email="cliente-reportes@example.com",
+            password="test-password",
+            empresa=self.company,
+            role=User.Role.ADMIN,
+        )
+        UserCompanyProfile.objects.create(
+            user=customer_user,
+            empresa=self.company,
+            role=company_role,
+            is_company_admin=True,
+            status=UserCompanyProfile.Status.ACTIVE,
+        )
+        self._approve(self.report)
+
+        factory = APIRequestFactory()
+        request = factory.get("/api/lubrication/reports/")
+        request.user = customer_user
+        view = ReporteViewSet()
+        view.request = request
+
+        # An approval alone never publishes a report to the customer.
+        self.assertFalse(view._scoped_queryset().filter(pk=self.report.pk).exists())
+
+        self.report.visible_cliente = True
+        self.report.save(update_fields=["visible_cliente"])
+        self.assertTrue(view._scoped_queryset().filter(pk=self.report.pk).exists())
+
+        self.report.estatus = "anulado"
+        self.report.save(update_fields=["estatus"])
+        self.assertFalse(view._scoped_queryset().filter(pk=self.report.pk).exists())
+
+    def test_internal_audience_can_see_unpublished_report_in_its_data_scope(self):
+        internal_role = SecurityRole.objects.create(
+            name="Laboratorio de prueba",
+            code="laboratorio-prueba",
+            scope=SecurityRole.Scope.INTERNAL,
+            data_scope=SecurityRole.DataScope.OWN_COMPANY,
+        )
+        laboratory_user = User.objects.create_user(
+            email="laboratorio-reportes@example.com",
+            password="test-password",
+            empresa=self.company,
+            role=User.Role.LABORATORISTA,
+        )
+        UserCompanyProfile.objects.create(
+            user=laboratory_user,
+            empresa=self.company,
+            role=internal_role,
+            status=UserCompanyProfile.Status.ACTIVE,
+        )
+        factory = APIRequestFactory()
+        request = factory.get("/api/lubrication/reports/")
+        request.user = laboratory_user
+        view = ReporteViewSet()
+        view.request = request
+
+        # The report is hidden and not approved, but it remains work visible
+        # to the laboratory; only the customer audience is publication-gated.
+        self.assertTrue(view._scoped_queryset().filter(pk=self.report.pk).exists())
 
     def test_dashboard_uses_lightweight_report_read_model(self):
         self.user.is_superuser = True

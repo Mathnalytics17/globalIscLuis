@@ -1,15 +1,19 @@
-from io import StringIO
+from io import BytesIO, StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
+from openpyxl import Workbook
 from rest_framework.test import APIClient
 
 from apps.misc.api.models.companies.index import Empresa
 from apps.misc.api.models.dynamicTechnicalConfig.index import (
     CatalogoTecnico,
+    CatalogoTecnicoVersion,
     CatalogoTecnicoItem,
+    CampoTecnicoMuestra,
     EscalaComparacion,
     EscalaComparacionItem,
     PruebaFuenteLimite,
@@ -18,7 +22,7 @@ from apps.misc.api.models.dynamicTechnicalConfig.index import (
 )
 from apps.misc.api.models.lotesPruebasPredefinidos.index import LotePruebasPredefinido
 from apps.misc.api.models.pruebas.index import Prueba, PruebaResultado, PruebaResultadoDivision, PruebaResultadoComponente
-from apps.misc.api.models.technicalCatalogs.index import Condicion, EquipoPrueba, MetodoEquipo, Unidad
+from apps.misc.api.models.technicalCatalogs.index import CategoriaUnidad, Condicion, EquipoPrueba, MetodoEquipo, Unidad
 from apps.misc.api.models.tipoGestionMuestra.index import TipoGestionMuestra
 from apps.users.api.models.index import User, UserInvitation
 
@@ -87,6 +91,167 @@ class DynamicTechnicalConfigApiTests(TestCase):
         )
 
         self.assertEqual(criterion.valores_limite[field.codigo], "12")
+
+    def test_matrix_import_preserves_every_supported_operator(self):
+        test = Prueba.objects.create(nombre_variable="Matriz de operaciones", acronimo="MOP")
+        source = PruebaFuenteLimite.objects.create(
+            prueba=test,
+            configuracion_regla={
+                "campos": [{
+                    "codigo": "resultado",
+                    "nombre": "Resultado",
+                    "origen_limite": "catalogo",
+                    "tipo_comparacion": "numerica",
+                }],
+            },
+        )
+        rows = [
+            ("max", "NO", None, None, "10", None, None),
+            ("min", "NO", None, "10", None, None, None),
+            ("between", "NO", None, "10", "20", None, None),
+            ("eq", "SI", None, None, None, None, "10"),
+            ("neq", "SI", None, None, None, None, "10"),
+            ("in", "SI", None, None, None, None, "10;20"),
+            ("not_in", "SI", None, None, None, None, "10;20"),
+            ("informativo", "SI", None, None, None, None, None),
+        ]
+        criteria = {}
+        for index, (operator, *_values) in enumerate(rows, start=1):
+            criteria[operator] = CriterioEvaluacionLimite.objects.create(
+                fuente_limite=source,
+                nombre=f"Criterio {operator}",
+                codigo=f"criterio_{index}",
+            )
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append([
+            "criterio_codigo", "campo_codigo", "operacion", "usa_semaforo",
+            "min_critico", "min_aceptable", "max_aceptable", "max_critico",
+            "valor_objetivo", "valores_permitidos", "comentario",
+        ])
+        for criterion, (operator, yellow, min_critical, min_ok, max_ok, max_critical, expected) in zip(criteria.values(), rows):
+            sheet.append([
+                criterion.codigo, "resultado", operator, yellow,
+                min_critical, min_ok, max_ok, max_critical, expected, None, None,
+            ])
+        stream = BytesIO()
+        workbook.save(stream)
+        upload = SimpleUploadedFile(
+            "matriz.xlsx",
+            stream.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = self.client.post(
+            f"/api/technical-config/limit-sources/{source.id}/import-matrix/",
+            {"archivo": upload},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["actualizados"], len(rows))
+        for operator, criterion in criteria.items():
+            criterion.refresh_from_db()
+            rule = criterion.valores_limite["resultado"]
+            self.assertEqual(rule["operador"], operator)
+            self.assertFalse(rule["usar_amarillo"])
+        self.assertEqual(criteria["eq"].valores_limite["resultado"]["valor_esperado"], "10")
+        self.assertEqual(criteria["in"].valores_limite["resultado"]["valor_esperado"], "10;20")
+
+    def test_catalog_version_selection_and_deactivation_never_deactivate_the_catalog(self):
+        catalog = CatalogoTecnico.objects.create(nombre="Viscosidad", codigo="viscosidad")
+        first = CatalogoTecnicoVersion.objects.create(catalogo=catalog, numero=1, nombre="Inicial")
+        second = CatalogoTecnicoVersion.objects.create(catalogo=catalog, numero=2, nombre="Nueva")
+        catalog.version_actual = first
+        catalog.save(update_fields=["version_actual"])
+
+        selected = self.client.post(f"/api/technical-config/catalog-versions/{second.id}/make-current/")
+        self.assertEqual(selected.status_code, 200)
+        catalog.refresh_from_db()
+        self.assertEqual(catalog.version_actual_id, second.id)
+        self.assertTrue(catalog.activo)
+
+        deactivated = self.client.post(f"/api/technical-config/catalog-versions/{first.id}/deactivate/")
+        self.assertEqual(deactivated.status_code, 200)
+        first.refresh_from_db()
+        catalog.refresh_from_db()
+        self.assertFalse(first.activo)
+        self.assertTrue(catalog.activo)
+        self.assertEqual(catalog.version_actual_id, second.id)
+
+        blocked = self.client.post(f"/api/technical-config/catalog-versions/{second.id}/deactivate/")
+        self.assertEqual(blocked.status_code, 400)
+        second.refresh_from_db()
+        self.assertTrue(second.activo)
+
+    def test_inactive_catalog_is_excluded_from_sample_form_without_erasing_its_configuration(self):
+        catalog = CatalogoTecnico.objects.create(
+            nombre="Uso de aceite",
+            codigo="uso_aceite",
+            tipo_muestra="aceite",
+        )
+        CampoTecnicoMuestra.objects.create(
+            nombre_visible="Uso",
+            codigo="uso",
+            tipo_muestra="aceite",
+            catalogo=catalog,
+            visible_en_ingreso=True,
+        )
+
+        active_response = self.client.get("/api/technical-config/catalogs/sample-form/?tipo_muestra=aceite")
+        self.assertEqual(active_response.status_code, 200)
+        self.assertTrue(any(field["catalogo"] == catalog.id for field in active_response.data))
+
+        catalog.soft_delete()
+        inactive_response = self.client.get("/api/technical-config/catalogs/sample-form/?tipo_muestra=aceite")
+        self.assertEqual(inactive_response.status_code, 200)
+        self.assertFalse(any(field["catalogo"] == catalog.id for field in inactive_response.data))
+        self.assertTrue(CatalogoTecnico.objects.filter(pk=catalog.id).exists())
+
+    def test_sample_form_exposes_only_current_catalog_version_items(self):
+        catalog = CatalogoTecnico.objects.create(
+            nombre="Grado de viscosidad", codigo="grado_viscosidad", tipo_muestra="aceite",
+        )
+        previous = CatalogoTecnicoVersion.objects.create(catalogo=catalog, numero=1, nombre="Inicial")
+        current = CatalogoTecnicoVersion.objects.create(catalogo=catalog, numero=2, nombre="Vigente")
+        catalog.version_actual = current
+        catalog.save(update_fields=["version_actual"])
+        CatalogoTecnicoItem.objects.create(catalogo=catalog, version=previous, nombre="SAE 20W-60", codigo="sae_20w_60")
+        CatalogoTecnicoItem.objects.create(catalogo=catalog, version=current, nombre="SAE 20W-60", codigo="sae_20w_60")
+        CatalogoTecnicoItem.objects.create(catalogo=catalog, version=current, nombre="SAE 15W-40", codigo="sae_15w_40")
+        CampoTecnicoMuestra.objects.create(
+            nombre_visible="Grado de viscosidad", codigo="grado_viscosidad",
+            tipo_muestra="aceite", catalogo=catalog, visible_en_ingreso=True,
+        )
+
+        response = self.client.get("/api/technical-config/catalogs/sample-form/?tipo_muestra=aceite")
+
+        self.assertEqual(response.status_code, 200)
+        field = next(item for item in response.data if item["catalogo"] == catalog.id)
+        self.assertEqual([item["codigo"] for item in field["catalogo_info"]["items"]], ["sae_15w_40", "sae_20w_60"])
+
+    def test_sample_field_rejects_catalog_with_incompatible_sample_kind(self):
+        oil_catalog = CatalogoTecnico.objects.create(
+            nombre="Viscosidad de aceite",
+            codigo="viscosidad_aceite",
+            tipo_muestra="aceite",
+        )
+        rejected = self.client.post(
+            "/api/technical-config/sample-fields/",
+            {
+                "nombre_visible": "NLGI",
+                "codigo": "nlgi",
+                "tipo_muestra": "grasa",
+                "catalogo": oil_catalog.id,
+                "activo": True,
+                "visible_en_ingreso": True,
+                "visible_en_asignacion": True,
+            },
+            format="json",
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("catalogo", rejected.data)
 
     def test_atomic_limit_configuration_creates_range_and_criterion(self):
         test = Prueba.objects.create(nombre_variable="Viscosidad", acronimo="VISC")
@@ -455,6 +620,35 @@ class CompanyApiTests(TestCase):
         self.assertEqual(self.empresa.nombre, "Cliente alias")
         self.assertEqual(self.empresa.direccion, "Direccion alias")
 
+    def test_global_company_is_hidden_from_operational_company_lists_unless_requested(self):
+        internal, _ = Empresa.objects.get_or_create(
+            nit="GLOBAL-OIL-INTERNAL",
+            defaults={"nombre": "Global Oil", "is_internal": True},
+        )
+        internal.is_internal = True
+        internal.save(update_fields=["is_internal"])
+
+        response = self.client.get("/api/companies/")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertNotIn(internal.id, [item["id"] for item in response.data])
+
+        response = self.client.get("/api/companies/?include_internal=true")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIn(internal.id, [item["id"] for item in response.data])
+
+    def test_global_company_cannot_be_disabled(self):
+        internal, _ = Empresa.objects.get_or_create(
+            nit="GLOBAL-OIL-INTERNAL",
+            defaults={"nombre": "Global Oil", "is_internal": True},
+        )
+        internal.is_internal = True
+        internal.save(update_fields=["is_internal"])
+
+        response = self.client.delete(f"/api/companies/{internal.id}/")
+        self.assertEqual(response.status_code, 400, response.data)
+        internal.refresh_from_db()
+        self.assertTrue(internal.is_active)
+
     @patch("apps.users.api.services.send_invitation_email", side_effect=OSError("SMTP no disponible"))
     def test_create_company_does_not_return_500_when_email_delivery_fails(self, _send_mail):
         response = self.client.post(
@@ -574,6 +768,88 @@ class SoftDeletedTechnicalConfigTests(TestCase):
         )
         self.assertEqual(updated.status_code, 200, updated.data)
 
+
+class UnitCategoryApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="unit-categories@example.com",
+            password="test-password",
+            role=User.Role.GLOBAL,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_category_is_unique_and_units_use_the_managed_category(self):
+        created = self.client.post(
+            "/api/technical-catalogs/unit-categories/",
+            {"nombre": "Temperatura QA aislada", "descripcion": "Magnitudes térmicas"},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        category_id = created.data["id"]
+
+        duplicate = self.client.post(
+            "/api/technical-catalogs/unit-categories/",
+            {"nombre": "  tEMPERATURA qa AISLADA  "},
+            format="json",
+        )
+        self.assertEqual(duplicate.status_code, 400, duplicate.data)
+        self.assertIn("nombre", duplicate.data)
+
+        unit = self.client.post(
+            "/api/technical-catalogs/units/",
+            {"nombre": "Grados Celsius", "simbolo": "°C QA", "categoria": category_id},
+            format="json",
+        )
+        self.assertEqual(unit.status_code, 201, unit.data)
+        self.assertEqual(unit.data["categoria"], category_id)
+        self.assertEqual(unit.data["categoria_info"]["nombre"], "Temperatura QA aislada")
+        self.assertEqual(unit.data["magnitud"], "Temperatura QA aislada")
+
+        renamed = self.client.patch(
+            f"/api/technical-catalogs/unit-categories/{category_id}/",
+            {"nombre": "Temperatura de proceso"},
+            format="json",
+        )
+        self.assertEqual(renamed.status_code, 200, renamed.data)
+        self.assertEqual(Unidad.objects.get(pk=unit.data["id"]).magnitud, "Temperatura de proceso")
+
+        condition = self.client.post(
+            "/api/technical-catalogs/conditions/",
+            {
+                "nombre": "Temperatura de referencia QA",
+                "magnitud_categoria": category_id,
+                "valor": 40,
+                "unidad": unit.data["id"],
+            },
+            format="json",
+        )
+        self.assertEqual(condition.status_code, 201, condition.data)
+        self.assertEqual(condition.data["magnitud"], "Temperatura de proceso")
+        self.assertEqual(condition.data["magnitud_info"]["id"], category_id)
+
+        other_category = self.client.post(
+            "/api/technical-catalogs/unit-categories/",
+            {"nombre": "Presión QA aislada"},
+            format="json",
+        )
+        self.assertEqual(other_category.status_code, 201, other_category.data)
+        invalid_condition = self.client.post(
+            "/api/technical-catalogs/conditions/",
+            {
+                "nombre": "Condición incompatible QA",
+                "magnitud_categoria": other_category.data["id"],
+                "valor": 40,
+                "unidad": unit.data["id"],
+            },
+            format="json",
+        )
+        self.assertEqual(invalid_condition.status_code, 400, invalid_condition.data)
+        self.assertIn("unidad", invalid_condition.data)
+
+        protected = self.client.delete(f"/api/technical-catalogs/unit-categories/{category_id}/")
+        self.assertEqual(protected.status_code, 409, protected.data)
+        self.assertTrue(CategoriaUnidad.objects.get(pk=category_id).activo)
 
 class TechnicalCatalogBusinessRuleTests(TestCase):
     def setUp(self):

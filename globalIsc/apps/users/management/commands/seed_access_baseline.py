@@ -122,10 +122,10 @@ class Command(BaseCommand):
             )
 
         companies = {}
-        for name, nit in (
-            ("Global Oil", "GLOBAL-OIL-DEMO"),
-            ("Empresa Minera Demo", "MINERA-DEMO"),
-            ("Taller Demo", "TALLER-DEMO"),
+        for name, nit, is_internal in (
+            ("Global Oil", "GLOBAL-OIL-INTERNAL", True),
+            ("Empresa Minera Demo", "MINERA-DEMO", False),
+            ("Taller Demo", "TALLER-DEMO", False),
         ):
             company, _ = Empresa.objects.update_or_create(
                 nombre=name,
@@ -133,6 +133,7 @@ class Command(BaseCommand):
                     "nit": nit,
                     "email": f"contacto@{nit.lower()}.test",
                     "is_active": True,
+                    "is_internal": is_internal,
                     "status": Empresa.Status.ACTIVE,
                 },
             )
