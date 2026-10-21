@@ -7,19 +7,31 @@ def establish_global_oil_company(apps, schema_editor):
     SecurityRole = apps.get_model("users", "SecurityRole")
     UserCompanyProfile = apps.get_model("users", "UserCompanyProfile")
 
-    company, _ = Empresa.objects.get_or_create(
-        nit="GLOBAL-OIL-INTERNAL",
-        defaults={
-            "nombre": "Global Oil",
-            "email": "contacto@globaloil.local",
-            "is_active": True,
-            "is_internal": True,
-            "status": "ACTIVE",
-        },
-    )
-    if not company.is_internal:
-        company.is_internal = True
-        company.save(update_fields=["is_internal"])
+    # Some deployed installations already have the operational company under
+    # its display name.  Looking up only by the new internal NIT would attempt
+    # a duplicate insert because ``nombre`` is unique.
+    company = Empresa.objects.filter(nit="GLOBAL-OIL-INTERNAL").first()
+    if company is None:
+        company = Empresa.objects.filter(nombre="Global Oil").first()
+    if company is None:
+        company = Empresa.objects.create(
+            nit="GLOBAL-OIL-INTERNAL",
+            nombre="Global Oil",
+            email="contacto@globaloil.local",
+            is_active=True,
+            is_internal=True,
+            status="ACTIVE",
+        )
+    else:
+        update_fields = []
+        if company.nit != "GLOBAL-OIL-INTERNAL":
+            company.nit = "GLOBAL-OIL-INTERNAL"
+            update_fields.append("nit")
+        if not company.is_internal:
+            company.is_internal = True
+            update_fields.append("is_internal")
+        if update_fields:
+            company.save(update_fields=update_fields)
 
     internal_roles = SecurityRole.objects.filter(scope__in=["GLOBAL", "INTERNAL"])
     fallback_role = SecurityRole.objects.filter(code="admin_global").first()
