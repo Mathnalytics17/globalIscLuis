@@ -74,6 +74,7 @@ class Command(BaseCommand):
             "misc.EquipoPrueba",
             "misc.Condicion",
             "misc.Unidad",
+            "misc.CategoriaUnidad",
             "misc.TipoGestionMuestra",
         ]
         for label in labels:
@@ -151,23 +152,52 @@ class Command(BaseCommand):
             self.items[("iso", name)] = self._catalog_item(iso, name, {"4um": parts[0], "6um": parts[1], "14um": parts[2]})
 
     def _seed_units_equipment_and_management_types(self):
+        CategoriaUnidad = model("misc.CategoriaUnidad")
         Unidad = model("misc.Unidad")
         Condicion = model("misc.Condicion")
         EquipoPrueba = model("misc.EquipoPrueba")
         MetodoEquipo = model("misc.MetodoEquipo")
         TipoGestionMuestra = model("misc.TipoGestionMuestra")
 
+        # A reset must build both sides of this relationship from one source.
+        # Do not set Unidad.magnitud alone: it is a compatibility label, while
+        # Unidad.categoria is the relationship consumed by the application.
+        categories = {
+            key: CategoriaUnidad.objects.create(
+                nombre=name,
+                descripcion=description,
+                activo=True,
+            )
+            for key, name, description in (
+                ("viscosidad", "Viscosidad", "Resistencia de un fluido al flujo."),
+                ("concentracion", "Concentración", "Proporción de una sustancia en una muestra."),
+                ("conteo", "Conteo", "Número de partículas u ocurrencias por volumen."),
+                ("temperatura", "Temperatura", "Estado térmico de una muestra o ensayo."),
+                ("espuma", "Espuma", "Volumen y estabilidad de espuma."),
+                ("adimensional", "Adimensional", "Resultados sin unidad física de medida."),
+            )
+        }
+        unit_specs = (
+            ("cSt", "Centistokes", "cSt", "viscosidad"),
+            ("ppm", "Partes por millón", "ppm", "concentracion"),
+            ("part/ml", "Partículas por mililitro", "partículas/ml", "conteo"),
+            ("C", "Grados Celsius", "°C", "temperatura"),
+            ("ml/ml", "Mililitros por mililitro", "ml/ml", "espuma"),
+            ("-", "Sin unidad", "-", "adimensional"),
+        )
         self.units = {
-            "cSt": Unidad.objects.create(nombre="Centistokes", simbolo="cSt", magnitud="viscosidad", activo=True),
-            "ppm": Unidad.objects.create(nombre="Partes por millón", simbolo="ppm", magnitud="concentracion", activo=True),
-            "part/ml": Unidad.objects.create(nombre="Partículas por mililitro", simbolo="partículas/ml", magnitud="conteo", activo=True),
-            "C": Unidad.objects.create(nombre="Grados Celsius", simbolo="°C", magnitud="temperatura", activo=True),
-            "ml/ml": Unidad.objects.create(nombre="Mililitros por mililitro", simbolo="ml/ml", magnitud="espuma", activo=True),
-            "-": Unidad.objects.create(nombre="Sin unidad", simbolo="-", magnitud="adimensional", activo=True),
+            key: Unidad.objects.create(
+                nombre=name,
+                simbolo=symbol,
+                categoria=categories[category_key],
+                magnitud=categories[category_key].nombre,
+                activo=True,
+            )
+            for key, name, symbol, category_key in unit_specs
         }
         self.conditions = {
-            "40": Condicion.objects.create(nombre="40", magnitud="temperatura", valor=Decimal("40.0000"), unidad=self.units["C"], activo=True),
-            "100": Condicion.objects.create(nombre="100", magnitud="temperatura", valor=Decimal("100.0000"), unidad=self.units["C"], activo=True),
+            "40": Condicion.objects.create(nombre="40", magnitud_categoria=categories["temperatura"], magnitud=categories["temperatura"].nombre, valor=Decimal("40.0000"), unidad=self.units["C"], activo=True),
+            "100": Condicion.objects.create(nombre="100", magnitud_categoria=categories["temperatura"], magnitud=categories["temperatura"].nombre, valor=Decimal("100.0000"), unidad=self.units["C"], activo=True),
         }
         equipo = EquipoPrueba.objects.create(codigo="KHALER01", nombre="KHALER01", activo=True)
         viscosimetro = EquipoPrueba.objects.create(codigo="VISCOSIMETRO", nombre="Viscosímetro", activo=True)
