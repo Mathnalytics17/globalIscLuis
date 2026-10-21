@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db.models import F
 from django.test import TestCase
 from django.utils import timezone
 from openpyxl import Workbook
@@ -40,6 +41,21 @@ class ResetGlobalOilFlowCommandTests(TestCase):
         self.assertTrue(User.objects.filter(pk=user.pk).exists())
         self.assertTrue(Prueba.objects.filter(acronimo="FERRO", activo=True).exists())
         self.assertTrue(Prueba.objects.filter(acronimo="ESP", activo=True).exists())
+        self.assertEqual(
+            set(CategoriaUnidad.objects.values_list("nombre", flat=True)),
+            {"Viscosidad", "Concentración", "Conteo", "Temperatura", "Espuma", "Adimensional"},
+        )
+        self.assertEqual(Unidad.objects.filter(categoria__isnull=True).count(), 0)
+        self.assertEqual(
+            Unidad.objects.filter(magnitud__isnull=False)
+            .exclude(magnitud=F("categoria__nombre"))
+            .count(),
+            0,
+        )
+        self.assertEqual(
+            Condicion.objects.exclude(magnitud_categoria=F("unidad__categoria")).count(),
+            0,
+        )
         ferro = Prueba.objects.get(acronimo="FERRO")
         self.assertEqual(ferro.resultados.filter(activo=True).count(), 4)
         self.assertEqual(
