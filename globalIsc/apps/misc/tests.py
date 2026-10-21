@@ -58,6 +58,13 @@ class ResetGlobalOilFlowCommandTests(TestCase):
             Condicion.objects.exclude(magnitud_categoria=F("unidad__categoria")).count(),
             0,
         )
+        self.assertFalse(CatalogoTecnico.objects.filter(version_actual__isnull=True).exists())
+        self.assertFalse(CatalogoTecnicoItem.objects.filter(version__isnull=True).exists())
+        for catalogo in CatalogoTecnico.objects.all():
+            self.assertEqual(
+                catalogo.items.count(),
+                catalogo.items.filter(version=catalogo.version_actual).count(),
+            )
         ferro = Prueba.objects.get(acronimo="FERRO")
         self.assertEqual(ferro.resultados.filter(activo=True).count(), 4)
         self.assertEqual(
@@ -97,6 +104,40 @@ class ResetGlobalOilFlowCommandTests(TestCase):
         self.assertFalse(PuntoMuestreo.objects.exists())
         self.assertFalse(Carpeta.objects.exists())
         self.assertFalse(Lubricante.objects.exists())
+
+
+class ReconcileCatalogVersionsCommandTests(TestCase):
+    def test_command_preserves_catalog_data_and_assigns_unversioned_items(self):
+        catalog_with_current = CatalogoTecnico.objects.create(nombre="Con versión", codigo="con_version")
+        current = CatalogoTecnicoVersion.objects.create(
+            catalogo=catalog_with_current,
+            numero=1,
+            nombre="Edición creada por usuario",
+        )
+        catalog_with_current.version_actual = current
+        catalog_with_current.save(update_fields=["version_actual"])
+        item_with_current = CatalogoTecnicoItem.objects.create(
+            catalogo=catalog_with_current,
+            nombre="Ítem heredado",
+            codigo="heredado",
+        )
+
+        catalog_without_version = CatalogoTecnico.objects.create(nombre="Sin versión", codigo="sin_version")
+        item_without_version = CatalogoTecnicoItem.objects.create(
+            catalogo=catalog_without_version,
+            nombre="Otro ítem heredado",
+            codigo="otro_heredado",
+        )
+
+        call_command("reconcile_catalog_versions", "--apply", stdout=StringIO())
+
+        item_with_current.refresh_from_db()
+        catalog_without_version.refresh_from_db()
+        item_without_version.refresh_from_db()
+        self.assertEqual(item_with_current.version_id, current.id)
+        self.assertIsNotNone(catalog_without_version.version_actual_id)
+        self.assertEqual(item_without_version.version_id, catalog_without_version.version_actual_id)
+        self.assertEqual(catalog_with_current.nombre, "Con versión")
 
 
 class DynamicTechnicalConfigApiTests(TestCase):

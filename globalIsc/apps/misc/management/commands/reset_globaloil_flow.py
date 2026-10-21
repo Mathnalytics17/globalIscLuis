@@ -92,7 +92,8 @@ class Command(BaseCommand):
 
     def _catalog(self, nombre, codigo, tipo_muestra="ambos", orden=1):
         CatalogoTecnico = model("misc.CatalogoTecnico")
-        return CatalogoTecnico.objects.create(
+        CatalogoTecnicoVersion = model("misc.CatalogoTecnicoVersion")
+        catalogo = CatalogoTecnico.objects.create(
             nombre=nombre,
             codigo=codigo,
             tipo_muestra=tipo_muestra,
@@ -101,11 +102,21 @@ class Command(BaseCommand):
             orden=orden,
             activo=True,
         )
+        version = CatalogoTecnicoVersion.objects.create(
+            catalogo=catalogo,
+            numero=1,
+            nombre="Versión inicial",
+            activo=True,
+        )
+        catalogo.version_actual = version
+        catalogo.save(update_fields=["version_actual", "updated_at"])
+        return catalogo
 
     def _catalog_item(self, catalog, nombre, metadata=None):
         CatalogoTecnicoItem = model("misc.CatalogoTecnicoItem")
         return CatalogoTecnicoItem.objects.create(
             catalogo=catalog,
+            version=catalog.version_actual,
             nombre=nombre,
             codigo=code(nombre),
             metadata=metadata or {},
