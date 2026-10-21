@@ -9,6 +9,8 @@ from django.utils import timezone
 from openpyxl import Workbook
 from rest_framework.test import APIClient
 
+from apps.activesTree.api.models.index import Carpeta, Lubricante, PuntoMuestreo
+from apps.activesTree.api.models.machines.index import Maquina
 from apps.misc.api.models.companies.index import Empresa
 from apps.misc.api.models.dynamicTechnicalConfig.index import (
     CatalogoTecnico,
@@ -68,6 +70,33 @@ class ResetGlobalOilFlowCommandTests(TestCase):
         source = PruebaFuenteLimite.objects.get(prueba=ferro, activo=True)
         self.assertNotIn("resultados_amarillos_para_critico", source.configuracion_regla)
         self.assertEqual(source.reglas_resultados, {})
+
+    def test_command_removes_assets_before_machines(self):
+        empresa = Empresa.objects.create(nombre="Empresa con activos previos")
+        maquina = Maquina.objects.create(nombre="Máquina previa", empresa=empresa)
+        lubricante = Lubricante.objects.create(
+            nombre="Lubricante previo",
+            fabricante="Global Oil",
+            referencia="PREVIO-1",
+        )
+        PuntoMuestreo.objects.create(
+            maquina=maquina,
+            nombre="Punto previo",
+            lubricante_catalogo=lubricante,
+        )
+        Carpeta.objects.create(
+            nombre="Carpeta previa",
+            compania=empresa,
+            typeFolder="maquina",
+            machine=maquina,
+        )
+
+        call_command("reset_globaloil_flow", "--yes", stdout=StringIO())
+
+        self.assertFalse(Maquina.objects.exists())
+        self.assertFalse(PuntoMuestreo.objects.exists())
+        self.assertFalse(Carpeta.objects.exists())
+        self.assertFalse(Lubricante.objects.exists())
 
 
 class DynamicTechnicalConfigApiTests(TestCase):

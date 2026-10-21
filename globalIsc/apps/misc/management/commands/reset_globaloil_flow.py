@@ -50,6 +50,12 @@ class Command(BaseCommand):
             "muestras.Muestra",
             "muestras.LoteMuestras",
             "muestras.SampleBatchExcelTemplateToken",
+            # PuntoMuestreo protects its machine, and assignments protect their
+            # point.  Remove the complete asset graph before its parent models.
+            "activesTree.AsignacionPuntoMuestreo",
+            "activesTree.Carpeta",
+            "activesTree.PuntoMuestreo",
+            "activesTree.Lubricante",
             "activesTree.Maquina",
             "misc.LotePruebasPredefinidoDetalle",
             "misc.LotePruebasPredefinido",
