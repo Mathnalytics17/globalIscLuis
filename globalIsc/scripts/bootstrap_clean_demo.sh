@@ -18,6 +18,7 @@ python manage.py migrate --noinput
 python manage.py reset_to_security_baseline --yes
 python manage.py seed_clean_demo_baseline --yes --reset-passwords
 python manage.py reset_globaloil_flow --yes
+python manage.py validate_globaloil_flow_seed
 python manage.py check
 
 echo "Base demo limpia reconstruida: seguridad, cuentas demo y flujo técnico local."

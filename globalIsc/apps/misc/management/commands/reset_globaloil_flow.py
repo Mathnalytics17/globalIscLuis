@@ -345,6 +345,10 @@ class Command(BaseCommand):
             politica_evaluacion=policy,
             minimo_campos_cumplidos=min_ok,
             configuracion_regla=config or {},
+            version=1,
+            # A seed is an operational baseline, not a draft.  New sample
+            # assignments may therefore use this first edition immediately.
+            publicada=True,
             activo=True,
         )
 

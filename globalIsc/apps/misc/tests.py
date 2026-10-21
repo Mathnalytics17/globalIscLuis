@@ -65,6 +65,17 @@ class ResetGlobalOilFlowCommandTests(TestCase):
                 catalogo.items.count(),
                 catalogo.items.filter(version=catalogo.version_actual).count(),
             )
+        for prueba in Prueba.objects.filter(activo=True):
+            source = PruebaFuenteLimite.objects.get(
+                prueba=prueba,
+                activo=True,
+                publicada=True,
+                deleted_at__isnull=True,
+            )
+            self.assertEqual(source.version, 1)
+            if source.tipo_limite != "sin_limite":
+                self.assertTrue(source.campos_limite.filter(activo=True).exists())
+        call_command("validate_globaloil_flow_seed", stdout=StringIO())
         ferro = Prueba.objects.get(acronimo="FERRO")
         self.assertEqual(ferro.resultados.filter(activo=True).count(), 4)
         self.assertEqual(
@@ -138,6 +149,23 @@ class ReconcileCatalogVersionsCommandTests(TestCase):
         self.assertIsNotNone(catalog_without_version.version_actual_id)
         self.assertEqual(item_without_version.version_id, catalog_without_version.version_actual_id)
         self.assertEqual(catalog_with_current.nombre, "Con versión")
+
+
+class ReconcileLimitVersionsCommandTests(TestCase):
+    def test_command_publishes_only_the_missing_active_version(self):
+        prueba = Prueba.objects.create(nombre_variable="Prueba heredada", acronimo="HEREDADA")
+        source = PruebaFuenteLimite.objects.create(
+            prueba=prueba,
+            tipo_limite="global",
+            version=1,
+            activo=True,
+            publicada=False,
+        )
+
+        call_command("reconcile_limit_versions", "--apply", stdout=StringIO())
+
+        source.refresh_from_db()
+        self.assertTrue(source.publicada)
 
 
 class DynamicTechnicalConfigApiTests(TestCase):
