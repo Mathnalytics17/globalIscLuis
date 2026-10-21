@@ -117,7 +117,9 @@ class ResetToSecurityBaselineCommandTests(TestCase):
         output = StringIO()
         call_command("reset_to_security_baseline", "--dry-run", stdout=output)
 
-        self.assertIn("misc.Empresa: 1", output.getvalue())
+        # The baseline now includes the Global Oil internal company created by
+        # migration 0019, in addition to this test's customer company.
+        self.assertIn("misc.Empresa: 2", output.getvalue())
         self.assertIn("activesTree.Maquina: 1", output.getvalue())
         self.assertTrue(Empresa.objects.filter(pk=self.company.pk).exists())
         self.assertTrue(UserCompanyProfile.objects.filter(user=self.user).exists())

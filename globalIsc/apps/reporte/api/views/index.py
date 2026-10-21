@@ -62,20 +62,21 @@ def _interpretation_from_sample(muestra):
 
 
 def _configured_predefined_comments(interpretation):
-    """Do not carry forward obsolete, hard-coded interpretation prose.
+    """Return the saved editorial comments of an interpretation.
 
-    New interpretations mark their selection as coming from Technical Comments.
-    Older records were populated by name-based backend fallbacks and are kept as
-    historical data, but must not be inserted into newly generated reports.
+    ``comentarios_predefinidos_configurados`` identifies interpretations saved
+    through the current Technical Comments screen.  It must not make an older,
+    otherwise valid interpretation disappear from a report: the report is a
+    snapshot and legacy records remain printable and sendable.  The flag only
+    tells the editor where the selection originated.
     """
-    if not interpretation.get("comentarios_predefinidos_configurados"):
-        return []
-    return (
+    comments = (
         interpretation.get("selected_predefined_comments")
         or interpretation.get("comentarios_predefinidos")
         or interpretation.get("predefined_comments")
         or []
     )
+    return [comment for comment in comments if isinstance(comment, str) and comment.strip()]
 
 
 def _has_interpretation(muestra):
@@ -960,8 +961,8 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="publish-client")
     def publish_client(self, request, pk=None):
         reporte = self.get_object()
-        if reporte.estatus == "anulado" or reporte.muestra.estado_operativo != "activa" or not reporte.muestra.is_revisado or not _has_interpretation(reporte.muestra):
-            return Response({"detail": "Reporte anulado o muestra sin revisión e interpretación vigente: no puede publicarse."}, status=status.HTTP_409_CONFLICT)
+        if reporte.estatus == "anulado" or reporte.muestra.estado_operativo != "activa":
+            return Response({"detail": "No puede publicarse un reporte anulado o cuya muestra fue invalidada."}, status=status.HTTP_409_CONFLICT)
         if not reporte.fecha_aprobacion or not reporte.usuario_aprobacion_id:
             return Response(
                 {"detail": "El reporte debe estar aprobado antes de publicarlo al cliente."},
@@ -1011,8 +1012,8 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="send-email")
     def send_email_report(self, request, pk=None):
         reporte = self.get_object()
-        if reporte.estatus == "anulado" or reporte.muestra.estado_operativo != "activa" or not reporte.muestra.is_revisado or not _has_interpretation(reporte.muestra):
-            return Response({"detail": "No puede enviarse un reporte anulado o con revisión/interpretación no vigente."}, status=status.HTTP_409_CONFLICT)
+        if reporte.estatus == "anulado" or reporte.muestra.estado_operativo != "activa":
+            return Response({"detail": "No puede enviarse un reporte anulado o cuya muestra fue invalidada."}, status=status.HTTP_409_CONFLICT)
         if not reporte.fecha_aprobacion or not reporte.usuario_aprobacion_id:
             return Response(
                 {"detail": "El reporte debe estar aprobado antes de enviarlo al cliente."},
@@ -1133,9 +1134,6 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         reports = []
         missing = []
         for muestra in lote.muestras.filter(estado_operativo="activa").order_by("id"):
-            if not muestra.is_revisado or not _has_interpretation(muestra):
-                missing.append(muestra.id)
-                continue
             reporte = (
                 accessible
                 .filter(

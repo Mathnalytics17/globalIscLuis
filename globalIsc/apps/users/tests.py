@@ -291,7 +291,9 @@ class DataScopeTests(TestCase):
         self.user.data_scope_override = SecurityRole.DataScope.ALL_COMPANIES
         self.user.save(update_fields=["data_scope_override"])
         self.assertIsNone(accessible_company_ids(self.user))
-        self.assertEqual(scope_queryset(Empresa.objects.all(), self.user, "id").count(), 3)
+        # The unrestricted scope also includes the Global Oil internal company
+        # established by migration 0019.
+        self.assertEqual(scope_queryset(Empresa.objects.all(), self.user, "id").count(), 4)
 
 
 class UserDirectoryPermissionTests(TestCase):
