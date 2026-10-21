@@ -8,8 +8,13 @@ from django.db import transaction
 
 
 OPERATIONAL_MODELS = (
+    # Bitácoras e importaciones dependen del flujo operativo; conservarlas
+    # después de borrar lotes/muestras deja evidencia sin entidad útil.
+    "muestras.EventoAuditoriaOperativa",
+    "muestras.CorridaImportacion",
     "reporte.ReporteEnvio",
     "reporte.Reporte",
+    "resultado.VersionInterpretacion",
     "resultado.RevisionResultado",
     "resultado.HistoricoResultado",
     "resultado.Resultado",

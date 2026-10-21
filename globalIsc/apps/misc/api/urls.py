@@ -3,7 +3,7 @@ from django.urls import include, path
 from .views.companies.index import EmpresaViewSet
 from .views.dynamicTechnicalConfig.index import PruebaLimiteCampoViewSet
 from .views.pruebas.index import PruebaViewSet
-from .views.technicalCatalogs.index import CondicionViewSet, EquipoPruebaViewSet, MetodoEquipoViewSet, UnidadViewSet
+from .views.technicalCatalogs.index import CategoriaUnidadViewSet, CondicionViewSet, EquipoPruebaViewSet, MetodoEquipoViewSet, UnidadViewSet
 
 
 urlpatterns = [
@@ -26,6 +26,9 @@ urlpatterns = [
     path("technical-catalogs/units/", UnidadViewSet.as_view({"get": "list", "post": "create"}), name="units-list"),
     path("technical-catalogs/units/<int:pk>/", UnidadViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="units-detail"),
     path("technical-catalogs/units/<int:pk>/reactivate/", UnidadViewSet.as_view({"post": "reactivate"}), name="units-reactivate"),
+    path("technical-catalogs/unit-categories/", CategoriaUnidadViewSet.as_view({"get": "list", "post": "create"}), name="unit-categories-list"),
+    path("technical-catalogs/unit-categories/<int:pk>/", CategoriaUnidadViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="unit-categories-detail"),
+    path("technical-catalogs/unit-categories/<int:pk>/reactivate/", CategoriaUnidadViewSet.as_view({"post": "reactivate"}), name="unit-categories-reactivate"),
     path("technical-catalogs/conditions/", CondicionViewSet.as_view({"get": "list", "post": "create"}), name="conditions-list"),
     path("technical-catalogs/conditions/<int:pk>/", CondicionViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="conditions-detail"),
     path("technical-catalogs/conditions/<int:pk>/reactivate/", CondicionViewSet.as_view({"post": "reactivate"}), name="conditions-reactivate"),

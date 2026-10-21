@@ -82,7 +82,7 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'email', 'first_name', 'last_name', 'full_name', 'role', 'phone', 'home_path', 'data_scope_override',
             'is_active', 'is_superuser', 'email_verified', 'empresa', 'empresa_id', 'access_status',
             'is_read_only', 'blocked_at', 'blocked_by', 'block_reason', 'block_scope',
-            'permissions', 'profile', 'effective_data_scope', 'assigned_company_ids', 'firma_predeterminada',
+            'last_login', 'permissions', 'profile', 'effective_data_scope', 'assigned_company_ids', 'firma_predeterminada',
         ]
         read_only_fields = ['id', 'email', 'is_active', 'is_superuser', 'email_verified', 'empresa', 'data_scope_override']
 

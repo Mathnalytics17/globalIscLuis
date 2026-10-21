@@ -17,7 +17,7 @@ from rest_framework.response import Response
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 
 from apps.activesTree.api.models.machines.index import Maquina
-from apps.activesTree.api.models.index import PuntoMuestreo
+from apps.activesTree.api.models.index import Lubricante, PuntoMuestreo
 from apps.misc.api.models.companies.index import Empresa
 from apps.misc.api.models.dynamicTechnicalConfig.index import CampoTecnicoMuestra
 from apps.muestras.api.models.sampleBatchExcel.index import SampleBatchExcelTemplateToken
@@ -26,7 +26,7 @@ from apps.muestras.services.operational_audit import record_operational_event
 from apps.users.api.models.index import User
 from apps.users.api.data_scope import can_access_company
 
-SCHEMA_VERSION = "sample-batch-v6-manual-sampling-points"
+SCHEMA_VERSION = "sample-batch-v8-current-catalog-editions"
 TEMPLATE_ROWS = 500
 MAX_IMPORT_ROWS = 5000
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
@@ -41,6 +41,7 @@ COMMON_HEADERS = [
     ("condicion", "Condición"),
     ("fabricante", "Fabricante"),
     ("referencia_marca", "Referencia / marca"),
+    ("lubricante_catalogo", "Lubricante registrado"),
     ("referencia_equipo", "Máquina"),
     ("punto_muestreo", "Punto de medida"),
     ("punto_muestreo_manual", "Punto de medida manual"),
@@ -96,6 +97,12 @@ def machine_label(obj):
     return f"{obj.pk} | {label}"
 
 
+def lubricant_label(obj):
+    """Keep the Excel selector useful when catalog names are generic."""
+    identity = " · ".join(part for part in [obj.fabricante, obj.referencia] if part)
+    return f"{obj.pk} | {identity or obj.nombre}"
+
+
 def parse_id(value):
     text = str(value or "").strip()
     if not text:
@@ -139,6 +146,7 @@ def write_catalog_sheet(workbook, fields_by_type, empresa_id=None):
     ws.sheet_state = "veryHidden"
     machines = Maquina.objects.none()
     sampling_points = PuntoMuestreo.objects.none()
+    lubricants = Lubricante.objects.filter(activo=True).order_by("fabricante", "referencia", "nombre", "id")
     if empresa_id:
         machines = Maquina.objects.filter(empresa_id=empresa_id).order_by("id")
         sampling_points = (
@@ -151,6 +159,7 @@ def write_catalog_sheet(workbook, fields_by_type, empresa_id=None):
         ("Unidades", ["horas", "km", "millas", "dias"]),
         ("Maquinas", [machine_label(item) for item in machines[:3000]]),
         ("PuntosMuestreo", [f"{item.pk} | {item.maquina.nombre} | {item.nombre}" for item in sampling_points[:3000]]),
+        ("Lubricantes", [lubricant_label(item) for item in lubricants[:3000]]),
     ]
 
     seen_fields = set()
@@ -161,10 +170,15 @@ def write_catalog_sheet(workbook, fields_by_type, empresa_id=None):
             seen_fields.add(field.pk)
             catalog = field.catalogo
             values = [UNKNOWN_LABEL]
+            active_items = catalog.items.filter(activo=True, deleted_at__isnull=True)
+            # A catalog can retain historical editions for traceability.  The
+            # intake template must offer only its published/current edition;
+            # otherwise equal names from old versions appear as duplicates.
+            if catalog.version_actual_id:
+                active_items = active_items.filter(version_id=catalog.version_actual_id)
             values += [
                 option_label(item)
-                for item in catalog.items.all()
-                if item.activo and not item.deleted_at
+                for item in active_items.order_by("nombre", "id")
             ]
             columns.append((technical_column_key(field), values))
 
@@ -203,6 +217,7 @@ def style_sample_sheet(ws, columns, ranges, sample_type, fields_by_type):
     add_list_validation(ws, f"{ws.cell(1, header_index['condicion']).column_letter}2:{ws.cell(1, header_index['condicion']).column_letter}{TEMPLATE_ROWS + 1}", ranges["Condiciones"])
     add_list_validation(ws, f"{ws.cell(1, header_index['referencia_equipo']).column_letter}2:{ws.cell(1, header_index['referencia_equipo']).column_letter}{TEMPLATE_ROWS + 1}", ranges["Maquinas"])
     add_list_validation(ws, f"{ws.cell(1, header_index['punto_muestreo']).column_letter}2:{ws.cell(1, header_index['punto_muestreo']).column_letter}{TEMPLATE_ROWS + 1}", ranges["PuntosMuestreo"])
+    add_list_validation(ws, f"{ws.cell(1, header_index['lubricante_catalogo']).column_letter}2:{ws.cell(1, header_index['lubricante_catalogo']).column_letter}{TEMPLATE_ROWS + 1}", ranges["Lubricantes"])
     for key in ["unidad_periodo_aceite", "unidad_periodo_equipo"]:
         letter = ws.cell(1, header_index[key]).column_letter
         add_list_validation(ws, f"{letter}2:{letter}{TEMPLATE_ROWS + 1}", ranges["Unidades"])
@@ -237,6 +252,7 @@ def generate_template_workbook(token):
         if has_company_context
         else "Este archivo no tiene una empresa registrada asociada. Para una muestra usada use Placa manual y Punto de medida manual; no se listan activos registrados."
     )
+    readme["A7"] = "Seleccione Lubricante registrado cuando exista en el catálogo. Fabricante y Referencia / marca quedan como alternativa para registrar uno manualmente."
     readme.column_dimensions["A"].width = 130
 
     ranges = write_catalog_sheet(workbook, fields_by_type, empresa_id=token.cliente_empresa_id)
@@ -300,12 +316,20 @@ def parse_row(ws, row, sample_type, fields_by_type, empresa_id=None):
     if condition not in ["usada", "nueva"]:
         add_error("Condición debe ser usada o nueva.", "Condición")
 
+    lubricant_id = parse_id(raw["lubricante_catalogo"])
+    lubricant = None
+    if lubricant_id and lubricant_id != UNKNOWN_LABEL:
+        lubricant = Lubricante.objects.filter(pk=lubricant_id, activo=True).first()
+        if not lubricant:
+            add_error(f"Lubricante registrado inválido ({lubricant_id}).", "Lubricante registrado")
+
     data = {
         "fecha_toma": raw["fecha_toma"],
         "tipo_muestra": sample_type,
         "condicion": condition,
         "fabricante": str(raw["fabricante"] or "").strip(),
         "referencia_marca": str(raw["referencia_marca"] or "").strip(),
+        "lubricante_catalogo": str(lubricant.pk) if lubricant else None,
         "equipo_placa": str(raw["equipo_placa"] or "").strip(),
         "punto_muestreo_manual": str(raw["punto_muestreo_manual"] or "").strip(),
         "periodo_servicio_aceite": as_float(raw["periodo_servicio_aceite"]),
@@ -323,8 +347,14 @@ def parse_row(ws, row, sample_type, fields_by_type, empresa_id=None):
 
     if not raw["fecha_toma"]:
         add_error("Fecha toma es obligatoria.", "Fecha toma")
-    if not data["referencia_marca"]:
-        add_error("Referencia / marca es obligatoria.", "Referencia / marca")
+    if not data["referencia_marca"] and not lubricant:
+        add_error("Seleccione un Lubricante registrado o indique Referencia / marca.", "Lubricante registrado", "Referencia / marca")
+    if lubricant:
+        # The catalog is the source of truth. Its identity will also be copied
+        # to the sample by the batch serializer on final creation.
+        data["fabricante"] = lubricant.fabricante
+        data["referencia_marca"] = lubricant.referencia or lubricant.nombre
+        data["campos_adicionales"]["fabricante"] = lubricant.fabricante or None
 
     point_id = parse_id(raw["punto_muestreo"])
     point_queryset = PuntoMuestreo.objects.filter(pk=point_id, activo=True).select_related("maquina")
@@ -377,6 +407,8 @@ def parse_row(ws, row, sample_type, fields_by_type, empresa_id=None):
         unknown = item_id == UNKNOWN_LABEL
 
         active_items = catalog.items.filter(activo=True, deleted_at__isnull=True)
+        if catalog.version_actual_id:
+            active_items = active_items.filter(version_id=catalog.version_actual_id)
         if not active_items.exists() and not item_id:
             unknown = True
 

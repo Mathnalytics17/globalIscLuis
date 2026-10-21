@@ -12,6 +12,7 @@ from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, PuntoMues
 from apps.activesTree.services import ensure_machine_tree_node
 from apps.users.api.models.index import User
 from apps.users.api.data_scope import can_access_company, effective_data_scope
+from apps.users.api.services import is_global_user
 from apps.muestras.api.serializers.muestras.index import MuestraListSerializer, MuestraSerializer
 from apps.misc.api.serializers.tipoGestionMuestra.index import TipoGestionMuestraSerializer
 from apps.muestras.api.serializers.muestraAtributoTecnico.index import (
@@ -115,7 +116,11 @@ class LoteMuestraWorkspaceSerializer(serializers.ModelSerializer):
         lote = obj.lote
         if obj.estado_operativo != "activa":
             return {"code": "invalidada", "label": "Invalidada"}
-        if lote and lote.estado == "reportado":
+        if obj.reportes.filter(
+            visible_cliente=True,
+            fecha_aprobacion__isnull=False,
+            usuario_aprobacion__isnull=False,
+        ).exclude(estatus="anulado").exists():
             return {"code": "reportada", "label": "Reportada"}
         if obj.is_revisado:
             return {"code": "revisada", "label": "Revisada"}
@@ -126,6 +131,11 @@ class LoteMuestraWorkspaceSerializer(serializers.ModelSerializer):
         return {"code": "registrada", "label": "Registrada"}
 
     def get_plazo_entrega(self, obj):
+        # SLA is operational information for Global Oil.  A company user sees
+        # the actual workflow state, never its internal deadline/countdown.
+        request = self.context.get("request")
+        if request and not is_global_user(request.user):
+            return {"configured": False, "hidden": True}
         lote = obj.lote
         management_type = getattr(lote, "tipo_gestion", None)
         if not lote or not management_type:

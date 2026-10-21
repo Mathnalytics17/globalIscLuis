@@ -14,6 +14,9 @@ class Empresa(models.Model):
     email = models.EmailField(blank=True, null=True)  # Hacer email opcional
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     is_active=models.BooleanField(default=True)
+    # Global Oil is an operational tenant for internal staff, not a customer.
+    # Keeping this explicit avoids relying on a display name to distinguish it.
+    is_internal = models.BooleanField(default=False, db_index=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE, db_index=True)
     read_only_until = models.DateTimeField(blank=True, null=True)
     retention_until = models.DateTimeField(blank=True, null=True)

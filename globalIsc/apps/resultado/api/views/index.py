@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from django.http import HttpResponse
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import viewsets, status
@@ -106,16 +106,25 @@ def _active_result_for(prueba_muestra):
 def _sync_sample_completion_from_tests(muestra):
     if not muestra:
         return
-    totals = PruebaMuestra.objects.filter(
+    # ``completada`` e ``is_revisada`` son proyecciones del resultado.  No
+    # basta con contar esas banderas: un resultado invalidado de una versión
+    # anterior puede haber dejado ambas en True.  La fuente de verdad es el
+    # resultado activo de cada prueba.
+    tests = PruebaMuestra.objects.filter(
         muestra=muestra, estado_asignacion="confirmada"
-    ).aggregate(
-        total=Count("pk"),
-        completed=Count("pk", filter=Q(completada=True)),
-        reviewed=Count("pk", filter=Q(is_revisada=True)),
+    ).prefetch_related("resultados")
+    total = tests.count()
+    valid_tests = []
+    for sample_test in tests:
+        active_result = _active_result_for(sample_test)
+        valid_tests.append(
+            bool(sample_test.completada and active_result and active_result.estatus != "rechazado")
+        )
+    completed = sum(valid_tests)
+    reviewed = sum(
+        bool(sample_test.is_revisada and is_valid)
+        for sample_test, is_valid in zip(tests, valid_tests)
     )
-    total = totals["total"]
-    completed = totals["completed"]
-    reviewed = totals["reviewed"]
     next_result = bool(total and completed == total)
     next_review = bool(total and reviewed == total)
     updates = []
@@ -493,6 +502,8 @@ def _sample_equipment_label(muestra):
 def _sample_review_status(muestra, tests):
     if not tests:
         return "Sin pruebas"
+    if any((test.get("resultado") or {}).get("estatus") == "rechazado" for test in tests):
+        return "Requiere corrección"
     evaluated_tests = [test for test in tests if test.get("aplicar_limites", True)]
     if not evaluated_tests:
         if all(t.get("is_revisada") for t in tests):
@@ -1220,6 +1231,7 @@ def _sample_tests_for_lote(lote, muestra_id=None, include_test_structure=True):
             "metodo_codigo": getattr(st.metodo_configurado, "codigo", None) or getattr(getattr(st.prueba, "metodo", None), "codigo", None) or "-",
             "resultado": _result_payload(result),
             "resultado_resumen": _result_summary(result, st),
+            "resultado_invalidado": bool(result and result.estatus == "rechazado"),
             "fecha_medicion": getattr(result, "fecha_medicion", None) or st.fecha_medicion,
             "usuario_medicion": _user_payload(st.usuario_medicion) or (_result_payload(result).get("usuario_medicion") if result and _result_payload(result) else None),
             "estatus": st.estatus,
@@ -1289,8 +1301,14 @@ def _batch_review_payload(lote):
             "is_resultado_ingresado": muestra.is_resultado_ingresado,
             "estado_revision": _sample_review_status(muestra, sample_tests),
             "tests_count": len(sample_tests),
-            "reviewed_count": len([item for item in sample_tests if item.get("is_revisada")]),
-            "has_interpretation": has_interpretation,
+            "reviewed_count": len([
+                item for item in sample_tests
+                if item.get("is_revisada") and not item.get("resultado_invalidado")
+            ]),
+            "has_interpretation": has_interpretation
+            and interpretation.get("estado") != "requiere_revision"
+            and not any(item.get("resultado_invalidado") for item in sample_tests),
+            "estado_operativo": muestra.estado_operativo,
         })
     return {
         "id": lote.id,
@@ -1306,27 +1324,63 @@ def _batch_review_payload(lote):
     }
 
 
+def _configured_comment_for_status(field, status):
+    """Return the DB-configured interpretation text for one evaluated field.
+
+    The technical-comment screen edits these three columns on
+    ``PruebaLimiteCampo``.  Interpretation must never infer prose from a test
+    name (for example, "viscosity" or "contamination"); that made report
+    wording invisible to administrators and disconnected from configuration.
+    """
+    status = _canonical_status(status)
+    if status == "NORMAL":
+        comment = field.comentario_normal
+    elif status in {"FUERA_DE_LIMITE", "CRITICO"}:
+        comment = field.comentario_fuera_limite
+    elif status in {
+        "NO_EVALUABLE", "SIN_INFORMACION_TECNICA", "SIN_LIMITE_CONFIGURADO",
+        "SIN_LIMITE", "SIN_LIMITES", "SIN_RESULTADO", "SIN_CRITERIO",
+    }:
+        comment = field.comentario_no_evaluable
+    else:
+        # Informative results do not require an automatic narrative unless a
+        # technical rule explicitly evaluates them as one of the states above.
+        comment = None
+    return str(comment or "").strip()
+
+
 def _build_predefined_comments(sample_tests):
+    """Build suggestions exclusively from active technical-comment settings."""
+    detail_rows = []
+    field_ids = set()
+    for sample_test in sample_tests:
+        evaluation = sample_test.get("evaluacion_limite") or {}
+        for detail in evaluation.get("details") or []:
+            field_id = detail.get("field_id")
+            if field_id:
+                field_ids.add(field_id)
+                detail_rows.append(detail)
+
+    if not field_ids:
+        return []
+
+    fields = {
+        field.id: field
+        for field in PruebaLimiteCampo.objects.filter(
+            id__in=field_ids,
+            activo=True,
+            deleted_at__isnull=True,
+        )
+    }
     comments = []
-    for item in sample_tests:
-        prueba = item.get("prueba", {})
-        nombre = (prueba.get("nombre_variable") or prueba.get("acronimo") or "").lower()
-        result = item.get("resultado_resumen") or "-"
-        estado = (item.get("estado_limite") or "").lower()
-        if "viscos" in nombre:
-            comments.append("La viscosidad del aceite se encuentra dentro del rango normal para la condición evaluada.")
-        elif "agua" in nombre:
-            comments.append("El contenido de agua se encuentra dentro del rango esperado para la muestra analizada.")
-        elif "contamin" in nombre or "part" in nombre or "iso" in nombre:
-            comments.append("El nivel de contaminación debe revisarse frente a la tabla de limpieza aplicable.")
-        elif estado in ["fuera", "alerta", "critico", "crítico"]:
-            comments.append(f"El ensayo {prueba.get('acronimo') or prueba.get('nombre_variable')} requiere seguimiento por valor {result}.")
-    # Deduplicate preserving order.
-    unique = []
-    for comment in comments:
-        if comment not in unique:
-            unique.append(comment)
-    return unique[:8]
+    for detail in detail_rows:
+        field = fields.get(detail.get("field_id"))
+        if not field:
+            continue
+        comment = _configured_comment_for_status(field, detail.get("estado"))
+        if comment and comment not in comments:
+            comments.append(comment)
+    return comments
 
 
 def _get_interpretation_data(muestra):
@@ -1463,21 +1517,70 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         reason = str(request.data.get("reason") or "").strip()
         if not reason:
             return Response({"reason": ["Indique el motivo de invalidación."]}, status=status.HTTP_400_BAD_REQUEST)
-        previous_status = resultado.estatus
-        resultado.estatus = "rechazado"
-        resultado.observaciones = "\n".join(filter(None, [resultado.observaciones, f"[Invalidado] {reason}"]))
-        resultado.save(update_fields=["estatus", "observaciones", "fecha_actualizacion"])
-        RevisionResultado.objects.create(
-            resultado=resultado,
-            usuario_revision=request.user,
-            estatus_anterior=previous_status,
-            estatus_nuevo="rechazado",
-            observaciones=f"Invalidado: {reason}",
-        )
-        prueba_muestra = resultado.prueba_muestra
-        prueba_muestra.estatus = "rechazado"
-        prueba_muestra.is_revisada = False
-        prueba_muestra.save(update_fields=["estatus", "is_revisada"])
+        # Invalidar no es solo una etiqueta del resultado: deja sin vigencia la
+        # revisión, la interpretación y cualquier informe que dependía de él.
+        # Hacerlo atómico evita que el lote quede "revisado" a medias.
+        with transaction.atomic():
+            previous_status = resultado.estatus
+            resultado.estatus = "rechazado"
+            resultado.observaciones = "\n".join(filter(None, [resultado.observaciones, f"[Invalidado] {reason}"]))
+            resultado.save(update_fields=["estatus", "observaciones", "fecha_actualizacion"])
+            RevisionResultado.objects.create(
+                resultado=resultado,
+                usuario_revision=request.user,
+                estatus_anterior=previous_status,
+                estatus_nuevo="rechazado",
+                observaciones=f"Invalidado: {reason}",
+            )
+            prueba_muestra = resultado.prueba_muestra
+            prueba_muestra.estatus = "rechazado"
+            prueba_muestra.completada = False
+            prueba_muestra.is_revisada = False
+            prueba_muestra.save(update_fields=["estatus", "completada", "is_revisada"])
+
+            muestra = prueba_muestra.muestra
+            extra = muestra.campos_adicionales if isinstance(muestra.campos_adicionales, dict) else {}
+            interpretation = extra.get("interpretacion") if isinstance(extra.get("interpretacion"), dict) else {}
+            interpretation.update({
+                "estado": "requiere_revision",
+                "invalidada_por_resultado": True,
+                "motivo_invalidacion_resultado": reason,
+                "resultado_invalidado_id": resultado.id,
+            })
+            extra["interpretacion"] = interpretation
+            muestra.campos_adicionales = extra
+            muestra.save(update_fields=["campos_adicionales"])
+            _sync_sample_completion_from_tests(muestra)
+
+            # Importación local para evitar un ciclo de módulos resultado/reporte.
+            from apps.reporte.api.models.index import Reporte
+            reports = list(Reporte.objects.select_for_update().filter(muestra=muestra).exclude(estatus="anulado"))
+            for reporte in reports:
+                previous_report_status = reporte.estatus
+                previous_report_visibility = reporte.visible_cliente
+                reporte.estatus = "anulado"
+                reporte.visible_cliente = False
+                reporte.notas_internas = "\n".join(filter(None, [
+                    reporte.notas_internas,
+                    f"[Anulado automáticamente] Resultado {resultado.id} invalidado: {reason}",
+                ]))
+                reporte.save(update_fields=["estatus", "visible_cliente", "notas_internas"])
+                record_operational_event(
+                    actor=request.user,
+                    action="reporte.anulado_por_resultado_invalidado",
+                    entity_type="reporte",
+                    entity_id=reporte.id,
+                    entity_label=f"{reporte.consecutivo} v{reporte.version}",
+                    lote=reporte.lote,
+                    muestra=muestra,
+                    reporte=reporte,
+                    detail="Reporte retirado porque uno de sus resultados fue invalidado.",
+                    reason=reason,
+                    before={"estatus": previous_report_status, "visible_cliente": previous_report_visibility},
+                    after={"estatus": "anulado", "visible_cliente": False},
+                )
+            if muestra.lote_id:
+                muestra.lote.recalcular_estado(save=True)
         record_operational_event(
             actor=request.user,
             action="resultado.invalidado",
@@ -1489,7 +1592,12 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             detail="Resultado invalidado.",
             reason=reason,
             before={"estatus": previous_status},
-            after={"estatus": "rechazado", "prueba_estatus": "rechazado"},
+            after={
+                "estatus": "rechazado",
+                "prueba_estatus": "rechazado",
+                "muestra_requiere_revision": True,
+                "reportes_anulados": len(reports),
+            },
         )
         return Response(ResultadoSerializer(resultado, context=self.get_serializer_context()).data)
 
@@ -1508,7 +1616,6 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         )
         if prueba_muestra.muestra.estado_operativo != "activa":
             raise ValidationError("No se pueden guardar resultados para una muestra invalidada.")
-        require_batch_operation(prueba_muestra.muestra.lote, "ingresar_resultados")
         values = request.data.get("values", [])
         observaciones = request.data.get("observaciones", "")
         fecha_medicion = request.data.get("fecha_medicion")
@@ -1570,9 +1677,33 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "saved_at": timezone.now().isoformat(),
             "saved_by": request.user.pk,
         }
+        idempotency_key = str(request.data.get("idempotency_key") or "").strip()
+        if idempotency_key:
+            payload["idempotency_key"] = idempotency_key
 
         result = _active_result_for(prueba_muestra)
         previous_payload = _safe_json_loads(result.resultado) if result else {}
+        # Network retries and double clicks must be harmless.  Once the same
+        # confirmation has been persisted, return its original outcome rather
+        # than treating the now-closed entry step as an error.
+        if (
+            idempotency_key
+            and estatus == "preliminar"
+            and result
+            and result.estatus == "preliminar"
+            and prueba_muestra.completada
+            and not prueba_muestra.is_revisada
+            and previous_payload.get("idempotency_key") == idempotency_key
+        ):
+            return Response({
+                "detail": "Resultado ya confirmado.",
+                "idempotent": True,
+                "resultado": ResultadoSerializer(result, context=self.get_serializer_context()).data,
+                "prueba_muestra": PruebaMuestraSerializer(prueba_muestra, context=self.get_serializer_context()).data,
+            })
+
+        require_batch_operation(prueba_muestra.muestra.lote, "ingresar_resultados")
+        was_invalidated = bool(result and result.estatus == "rechazado")
         result_was_created = result is None
         fecha_dt = timezone.now()
         if fecha_medicion:
@@ -1616,6 +1747,12 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             prueba_muestra.completada = True
             prueba_muestra.fecha_medicion = fecha_dt
             prueba_muestra.usuario_medicion = request.user
+            # Una corrección pertenece a ingreso de resultados y siempre exige
+            # una nueva revisión, incluso si un dato histórico quedó marcado.
+            if was_invalidated:
+                prueba_muestra.is_revisada = False
+                prueba_muestra.usuario_revision = None
+                prueba_muestra.fecha_revision = None
 
         prueba_muestra.valor = _compact_result_value(clean_values)
         prueba_muestra.observaciones = observaciones or prueba_muestra.observaciones
@@ -1863,6 +2000,11 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
         now = timezone.now()
         with transaction.atomic():
+            corrected_test_ids = [
+                sample_test.id
+                for sample_test in sample_tests
+                if results[sample_test.id].estatus == "rechazado"
+            ]
             Resultado.objects.filter(pk__in=[result.pk for result in results.values()]).update(
                 estatus="preliminar",
                 fecha_medicion=now,
@@ -1874,6 +2016,12 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 fecha_medicion=now,
                 usuario_medicion=request.user,
             )
+            if corrected_test_ids:
+                PruebaMuestra.objects.filter(pk__in=corrected_test_ids).update(
+                    is_revisada=False,
+                    usuario_revision=None,
+                    fecha_revision=None,
+                )
             affected_samples = {sample_test.muestra_id: sample_test.muestra for sample_test in sample_tests}
             for sample in affected_samples.values():
                 _sync_sample_completion_from_tests(sample)
@@ -2677,7 +2825,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             self._scope_lotes(
                 LoteMuestras.objects
                 .select_related("cliente_empresa", "tipo_gestion")
-                .filter(muestras__resultados__resultados__isnull=False)
+                .filter(muestras__estado_operativo="activa", muestras__resultados__resultados__isnull=False)
             )
             .distinct()
             .order_by("-fecha_actualizacion")
@@ -2824,6 +2972,10 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "justificacion": justificacion,
         }
         resultado.resultado = json.dumps(new_payload, ensure_ascii=False)
+        # La corrección restablece un resultado invalidado como pendiente de revisión.
+        # Mantener "rechazado" impedía al usuario revisarlo, aunque se hubieran
+        # corregido sus valores. El historial de invalidación permanece intacto.
+        resultado.estatus = "preliminar"
         resultado.fecha_actualizacion = timezone.now()
         resultado.usuario_medicion = request.user
         resultado.observaciones = request.data.get("observaciones") or resultado.observaciones
@@ -2835,6 +2987,9 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         st.fecha_medicion = timezone.now()
         st.estatus = "completado"
         st.completada = True
+        st.is_revisada = False  # Toda corrección exige una nueva revisión explícita.
+        st.usuario_revision = None
+        st.fecha_revision = None
         st.save()
         _sync_sample_test_limit_evaluation(st, resultado)
         _sync_sample_completion_from_tests(st.muestra)
@@ -2864,6 +3019,9 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         if prueba_muestra.muestra.estado_operativo != "activa":
             return Response({"detail": "Una muestra invalidada no puede revisarse."}, status=status.HTTP_409_CONFLICT)
         require_batch_operation(prueba_muestra.muestra.lote, "revisar_resultados")
+        current_result = _active_result_for(prueba_muestra)
+        if current_result is None or current_result.estatus == "rechazado":
+            return Response({"detail": "El resultado invalidado debe corregirse antes de revisarlo."}, status=status.HTTP_409_CONFLICT)
         if not prueba_muestra.completada:
             return Response(
                 {"detail": "No se puede revisar una prueba sin resultado completo."},
@@ -2937,6 +3095,9 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         count = 0
         for st in tests:
             if not st.is_revisada:
+                active_result = _active_result_for(st)
+                if not st.completada or not active_result or active_result.estatus == "rechazado":
+                    continue
                 st.is_revisada = True
                 st.usuario_revision = request.user
                 st.fecha_revision = now
@@ -2996,6 +3157,10 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             muestra.id,
             include_test_structure=False,
         ) if muestra.lote_id else []
+        # Resolve configured narratives before trimming evaluation details from
+        # the response payload. Those details carry the technical field id and
+        # its evaluated state.
+        predefined_comments = _build_predefined_comments(tests)
         for test in tests:
             # La pantalla consume el resumen y los detalles normalizados. El JSON
             # crudo del resultado y la evaluación repetían la misma información
@@ -3010,10 +3175,41 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 evaluation.pop("details", None)
                 evaluation.pop("raw", None)
         interpretation = _get_interpretation_data(muestra)
+        invalidated_test = next(
+            (test for test in tests if (test.get("resultado") or {}).get("estatus") == "rechazado"),
+            None,
+        )
+        if invalidated_test:
+            # También protege datos históricos que fueron invalidados antes de
+            # que existiera la reconciliación transaccional de invalidación.
+            interpretation = {
+                **interpretation,
+                "estado": "requiere_revision",
+                "invalidada_por_resultado": True,
+                "resultado_invalidado_id": (invalidated_test.get("resultado") or {}).get("id"),
+                "prueba_invalidada": (invalidated_test.get("prueba") or {}).get("acronimo"),
+            }
         point_assignment = next(
             (item for item in muestra.asignaciones_punto_muestreo.all() if item.activa),
             None,
         )
+        # Before technical comments were configurable, this endpoint fabricated
+        # prose from test names. Saved selections from that period have no
+        # configuration source, so they are not surfaced as suggestions.
+        has_configured_comment_selection = bool(
+            interpretation.get("comentarios_predefinidos_configurados")
+        )
+        selected_predefined_comments = (
+            interpretation.get("comentarios_predefinidos") or []
+            if has_configured_comment_selection
+            else predefined_comments
+        )
+        # A configured comment may have changed or been removed after an
+        # interpretation was saved. Never include stale wording in a report.
+        selected_predefined_comments = [
+            comment for comment in selected_predefined_comments
+            if comment in predefined_comments
+        ]
         return Response({
             "muestra": {
                 "id": muestra.id,
@@ -3030,8 +3226,8 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 } if point_assignment else None,
             },
             "sample_tests": tests,
-            "predefined_comments": _build_predefined_comments(tests),
-            "selected_predefined_comments": interpretation.get("comentarios_predefinidos") if "comentarios_predefinidos" in interpretation else _build_predefined_comments(tests),
+            "predefined_comments": predefined_comments,
+            "selected_predefined_comments": selected_predefined_comments,
             "conclusion": interpretation.get("conclusion") or interpretation.get("comentario_proveedor") or "",
             "comentarios_manuales": interpretation.get("comentarios_manuales") or [],
             # Incluir tendencias es una decisión editorial del informe, no una
@@ -3052,6 +3248,20 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         from apps.muestras.api.models.muestras.index import Muestra
         muestra = get_object_or_404(self._scope_samples(Muestra.objects), pk=muestra_id)
         reason = str(request.data.get("motivo") or "").strip()
+        if muestra.estado_operativo != "activa":
+            return Response({"detail": "Una muestra invalidada no puede interpretarse."}, status=status.HTTP_409_CONFLICT)
+        invalidated_result = (
+            Resultado.objects.filter(prueba_muestra__muestra=muestra, estatus="rechazado")
+            .order_by("-fecha_actualizacion", "-id")
+            .first()
+        )
+        if invalidated_result:
+            return Response(
+                {"detail": "Corrija y revise el resultado invalidado antes de guardar la interpretación."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if not muestra.is_revisado:
+            return Response({"detail": "Revise todos los ensayos de la muestra antes de guardar su interpretación."}, status=status.HTTP_409_CONFLICT)
         with transaction.atomic():
             # Serializa las versiones por muestra; dos guardados simultáneos no
             # pueden reutilizar el mismo consecutivo.
@@ -3060,6 +3270,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             data = {
                 "conclusion": request.data.get("conclusion") or "",
                 "comentarios_predefinidos": request.data.get("comentarios_predefinidos") or [],
+                "comentarios_predefinidos_configurados": True,
                 "comentarios_manuales": request.data.get("comentarios_manuales") or [],
                 "graficas_activas": bool(request.data.get("graficas_activas", False)),
                 "graficas_seleccionadas": request.data.get("graficas_seleccionadas") or [],

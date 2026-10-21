@@ -39,7 +39,7 @@ from apps.reporte.api.serializers.index import (
 from apps.resultado.api.views.index import _sample_tests_for_lote
 from apps.resultado.api.models.index import VersionInterpretacion
 from apps.users.api.models.index import User
-from apps.users.api.data_scope import scope_queryset
+from apps.users.api.data_scope import scope_queryset, scope_released_reports_queryset
 from apps.users.api.services import audit_user_action
 from apps.muestras.services.operational_audit import record_operational_event
 from PIL import Image, UnidentifiedImageError
@@ -61,13 +61,32 @@ def _interpretation_from_sample(muestra):
     return extra.get("interpretacion", {}) or {}
 
 
+def _configured_predefined_comments(interpretation):
+    """Return the saved editorial comments of an interpretation.
+
+    ``comentarios_predefinidos_configurados`` identifies interpretations saved
+    through the current Technical Comments screen.  It must not make an older,
+    otherwise valid interpretation disappear from a report: the report is a
+    snapshot and legacy records remain printable and sendable.  The flag only
+    tells the editor where the selection originated.
+    """
+    comments = (
+        interpretation.get("selected_predefined_comments")
+        or interpretation.get("comentarios_predefinidos")
+        or interpretation.get("predefined_comments")
+        or []
+    )
+    return [comment for comment in comments if isinstance(comment, str) and comment.strip()]
+
+
 def _has_interpretation(muestra):
     data = _interpretation_from_sample(muestra)
+    if data.get("estado") == "requiere_revision":
+        return False
     return bool(
         data.get("conclusion")
         or data.get("comentario_proveedor")
-        or data.get("comentarios_predefinidos")
-        or data.get("selected_predefined_comments")
+        or _configured_predefined_comments(data)
         or data.get("comentarios_manuales")
     )
 
@@ -101,17 +120,33 @@ def _interpretation_version_for_report(muestra, user):
 
 
 def _mark_lote_reported_if_ready(lote):
+    """Close a batch only when every active sample has been delivered.
+
+    A generated or merely approved report is still an internal artifact.  The
+    batch is finished when every active sample has a non-annulled report that
+    was actually published to the client or sent by email.
+    """
     if not lote:
         return
     active_samples = lote.muestras.filter(estado_operativo="activa")
     total = active_samples.count()
-    reported = active_samples.filter(reportes__isnull=False).distinct().count()
+    delivered = Q(reportes__visible_cliente=True) | Q(reportes__fecha_envio__isnull=False)
+    reported = active_samples.filter(
+        delivered,
+        reportes__fecha_aprobacion__isnull=False,
+        reportes__usuario_aprobacion__isnull=False,
+    ).exclude(reportes__estatus="anulado").distinct().count()
     if total and reported == total:
-        lote.estado = "reportado"
-        update_fields = ["estado"]
-        if hasattr(lote, "fecha_actualizacion"):
-            update_fields.append("fecha_actualizacion")
-        lote.save(update_fields=update_fields)
+        if lote.estado != "reportado":
+            lote.estado = "reportado"
+            update_fields = ["estado"]
+            if hasattr(lote, "fecha_actualizacion"):
+                update_fields.append("fecha_actualizacion")
+            lote.save(update_fields=update_fields)
+    elif lote.estado == "reportado":
+        # A report can later be withdrawn or annulled after an invalidation.
+        # Never leave the lot terminal in that case.
+        lote.recalcular_estado(save=True)
 
 
 def _json_safe(value):
@@ -432,10 +467,11 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         queryset = self.queryset.annotate(
             ultima_version_value=Subquery(latest_version)
         )
-        queryset = scope_queryset(queryset, self.request.user, "lote__cliente_empresa_id")
-        if getattr(self.request.user, "role", None) == "EMPRESA":
-            queryset = queryset.filter(visible_cliente=True)
-        return queryset
+        return scope_released_reports_queryset(
+            queryset,
+            self.request.user,
+            "lote__cliente_empresa_id",
+        )
 
     def _dashboard_filter_options(self):
         """Return report-derived filter values under exactly the same scope."""
@@ -658,12 +694,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         empresa = getattr(lote, "cliente_empresa", None) if lote else None
 
         comments = {
-            "predefinidos": (
-                interpretation.get("selected_predefined_comments")
-                or interpretation.get("comentarios_predefinidos")
-                or interpretation.get("predefined_comments")
-                or []
-            ),
+            "predefinidos": _configured_predefined_comments(interpretation),
             "manuales": interpretation.get("comentarios_manuales") or [],
             "conclusion": interpretation.get("conclusion") or interpretation.get("comentario_proveedor") or "",
         }
@@ -783,7 +814,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         if not muestra.is_revisado:
             return Response({"detail": "No puede generar reporte: la muestra aun no esta revisada."}, status=status.HTTP_400_BAD_REQUEST)
         if not _has_interpretation(muestra):
-            return Response({"detail": "No puede generar reporte: primero guarde la interpretacion de la muestra."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "No puede generar reporte: primero guarde una interpretación válida de la muestra."}, status=status.HTTP_400_BAD_REQUEST)
 
         reporte = self._create_from_interpretation(muestra, request)
         _mark_lote_reported_if_ready(muestra.lote)
@@ -930,6 +961,8 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="publish-client")
     def publish_client(self, request, pk=None):
         reporte = self.get_object()
+        if reporte.estatus == "anulado" or reporte.muestra.estado_operativo != "activa":
+            return Response({"detail": "No puede publicarse un reporte anulado o cuya muestra fue invalidada."}, status=status.HTTP_409_CONFLICT)
         if not reporte.fecha_aprobacion or not reporte.usuario_aprobacion_id:
             return Response(
                 {"detail": "El reporte debe estar aprobado antes de publicarlo al cliente."},
@@ -937,6 +970,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             )
         reporte.visible_cliente = True
         reporte.save(update_fields=["visible_cliente"])
+        _mark_lote_reported_if_ready(reporte.lote)
         ReporteEnvio.objects.create(reporte=reporte, canal="app", enviado_por=request.user, estado="enviado")
         record_operational_event(
             actor=request.user,
@@ -959,6 +993,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         was_visible = reporte.visible_cliente
         reporte.visible_cliente = False
         reporte.save(update_fields=["visible_cliente"])
+        _mark_lote_reported_if_ready(reporte.lote)
         record_operational_event(
             actor=request.user,
             action="reporte.ocultado_cliente",
@@ -977,6 +1012,8 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="send-email")
     def send_email_report(self, request, pk=None):
         reporte = self.get_object()
+        if reporte.estatus == "anulado" or reporte.muestra.estado_operativo != "activa":
+            return Response({"detail": "No puede enviarse un reporte anulado o cuya muestra fue invalidada."}, status=status.HTTP_409_CONFLICT)
         if not reporte.fecha_aprobacion or not reporte.usuario_aprobacion_id:
             return Response(
                 {"detail": "El reporte debe estar aprobado antes de enviarlo al cliente."},
@@ -1077,6 +1114,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             metadata={"destinatarios": len(recipients)},
             after={"estatus": reporte.estatus, "visible_cliente": reporte.visible_cliente},
         )
+        _mark_lote_reported_if_ready(reporte.lote)
 
         return Response({
             "detail": "Reporte enviado.",
@@ -1095,7 +1133,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
         reports = []
         missing = []
-        for muestra in lote.muestras.all().order_by("id"):
+        for muestra in lote.muestras.filter(estado_operativo="activa").order_by("id"):
             reporte = (
                 accessible
                 .filter(
@@ -1241,6 +1279,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                     reporte=report, canal="email", destinatario_email=recipient,
                     enviado_por=request.user, estado="enviado",
                 )
+        _mark_lote_reported_if_ready(lote)
         record_operational_event(
             actor=request.user,
             action="lote.reportes_enviados_correo",
@@ -1264,7 +1303,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     def versions(self, request, pk=None):
         reporte = self.get_object()
         versions = (
-            Reporte.objects
+            self._scoped_queryset()
             .filter(muestra_id=reporte.muestra_id)
             .select_related("muestra", "lote", "lote__cliente_empresa", "usuario_emision", "usuario_envio")
             .order_by("-version")

@@ -286,6 +286,15 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.select_related("empresa").all().order_by('-date_joined')
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
+
+    def _can_view_user_directory(self):
+        """Keep the legacy user directory behind the same RBAC rule as security profiles."""
+        user = self.request.user
+        return bool(
+            user.is_superuser
+            or user.role == User.Role.GLOBAL
+            or user_has_permission(user, "empresas.ver_usuarios")
+        )
     def get_permissions(self):
         """
         Asigna permisos según la acción:
@@ -309,6 +318,14 @@ class UserViewSet(viewsets.ModelViewSet):
         if user.is_superuser or user.role == User.Role.GLOBAL:
             return queryset
         return queryset.filter(empresa=user.empresa)
+
+    def list(self, request, *args, **kwargs):
+        # This endpoint is consumed by the administration table.  Authentication
+        # alone must not reveal names, email addresses, roles or access state of
+        # colleagues in the same company.
+        if not self._can_view_user_directory():
+            self.permission_denied(request, message="No tiene permisos para ver usuarios de la empresa.")
+        return super().list(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'])
     def me(self, request):
@@ -353,6 +370,16 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
     def _can_manage_users(self, permission_code="usuarios.editar"):
         user = self.request.user
         return user.is_superuser or user.role == User.Role.GLOBAL or user_has_permission(user, permission_code)
+
+    def get(self, request, *args, **kwargs):
+        instance = self.get_object()
+        # A user can always inspect their own profile.  Viewing any other user
+        # belongs to the company-user-directory permission, not merely to being
+        # authenticated in the same company.
+        if instance != request.user and not self._can_manage_users("empresas.ver_usuarios"):
+            self.permission_denied(request, message="No tiene permisos para ver usuarios de la empresa.")
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
     def update(self, request, *args, **kwargs):
         target = self.get_object()

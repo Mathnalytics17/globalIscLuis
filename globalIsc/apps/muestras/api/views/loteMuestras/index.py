@@ -416,7 +416,11 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 )
 
             page = self.paginate_queryset(queryset)
-            serializer = LoteMuestraWorkspaceSerializer(page if page is not None else queryset, many=True)
+            serializer = LoteMuestraWorkspaceSerializer(
+                page if page is not None else queryset,
+                many=True,
+                context={"request": request},
+            )
             return self.get_paginated_response(serializer.data) if page is not None else Response(serializer.data)
 
         if lote.estado == "cancelado":

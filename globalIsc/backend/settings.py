@@ -228,6 +228,9 @@ CORS_ALLOWED_ORIGINS = env_list(
     ],
 )
 CORS_ALLOW_CREDENTIALS = True
+CORS_EXPOSE_HEADERS = [
+    "X-Session-Expired",
+]
 CORS_ALLOW_HEADERS = [
     "accept",
     "accept-encoding",

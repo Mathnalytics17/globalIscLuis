@@ -10,7 +10,7 @@ from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from apps.misc.api.models.companies.index import Empresa
 from apps.users.api.models.index import User
-from apps.users.api.models.index import SecurityPermission, SecurityRole, UserCompanyProfile, UserDataScopeCompany
+from apps.users.api.models.index import SecurityPermission, SecurityRole, SecurityRolePermission, UserCompanyProfile, UserDataScopeCompany
 from apps.users.api.data_scope import accessible_company_ids, scope_queryset
 from apps.users.api.services import accept_invitation, create_invitation, seed_default_permissions
 from apps.users.api.views.user.index import CurrentUserView
@@ -147,6 +147,46 @@ class AccessBaselineCommandTests(TestCase):
         self.assertTrue(admin.check_password(password))
 
 
+class InternalGlobalOilInvitationTests(TestCase):
+    def setUp(self):
+        seed_default_permissions()
+        self.global_company = Empresa.objects.create(
+            nombre="Global Oil Interna",
+            nit="GO-INTERNA-TEST",
+            is_internal=True,
+        )
+        self.customer_company = Empresa.objects.create(nombre="Cliente Test", nit="CLIENTE-TEST")
+        self.labor_role = SecurityRole.objects.get(code="laboratorista")
+        self.company_role = SecurityRole.objects.get(code="empresa_consulta")
+
+    @patch("apps.users.api.services.deliver_invitation_email", return_value=(True, ""))
+    def test_internal_role_is_invited_to_global_oil_and_keeps_its_legacy_role(self, _delivery):
+        invitation = create_invitation(
+            "nuevo.laboratorista@example.com",
+            self.global_company,
+            role=self.labor_role,
+        )
+        accepted = accept_invitation(
+            invitation.token,
+            "Nuevo",
+            "Laboratorista",
+            "Safe-password-123!",
+        )
+        accepted.refresh_from_db()
+        self.assertEqual(accepted.empresa_id, self.global_company.id)
+        self.assertEqual(accepted.role, User.Role.LABORATORISTA)
+        self.assertEqual(
+            accepted.company_profiles.get(empresa=self.global_company).role_id,
+            self.labor_role.id,
+        )
+
+    def test_internal_and_customer_roles_cannot_cross_company_boundaries(self):
+        with self.assertRaisesMessage(ValueError, "roles internos"):
+            create_invitation("wrong-internal@example.com", self.customer_company, role=self.labor_role)
+        with self.assertRaisesMessage(ValueError, "empresa cliente"):
+            create_invitation("wrong-company@example.com", self.global_company, role=self.company_role)
+
+
 class UserReinvitationLifecycleTests(TestCase):
     def setUp(self):
         self.company_a = Empresa.objects.create(nombre="Empresa A")
@@ -251,4 +291,53 @@ class DataScopeTests(TestCase):
         self.user.data_scope_override = SecurityRole.DataScope.ALL_COMPANIES
         self.user.save(update_fields=["data_scope_override"])
         self.assertIsNone(accessible_company_ids(self.user))
-        self.assertEqual(scope_queryset(Empresa.objects.all(), self.user, "id").count(), 3)
+        # The unrestricted scope also includes the Global Oil internal company
+        # established by migration 0019.
+        self.assertEqual(scope_queryset(Empresa.objects.all(), self.user, "id").count(), 4)
+
+
+class UserDirectoryPermissionTests(TestCase):
+    """The old /users/ routes must enforce the same permission as the RBAC UI."""
+
+    def setUp(self):
+        seed_default_permissions()
+        self.company = Empresa.objects.create(nombre="Empresa directorio")
+        self.directory_role = SecurityRole.objects.create(
+            name="Rol directorio de prueba",
+            code="rol-directorio-prueba",
+            scope=SecurityRole.Scope.COMPANY,
+        )
+        SecurityRolePermission.objects.create(
+            role=self.directory_role,
+            permission=SecurityPermission.objects.get(code="empresas.ver_usuarios"),
+            allowed=True,
+        )
+        self.viewer = User.objects.create_user(
+            email="visor-directorio@example.com", password="Test-password-123!", empresa=self.company,
+        )
+        self.member = User.objects.create_user(
+            email="miembro-directorio@example.com", password="Test-password-123!", empresa=self.company,
+        )
+        self.target = User.objects.create_user(
+            email="objetivo-directorio@example.com", password="Test-password-123!", empresa=self.company,
+        )
+        UserCompanyProfile.objects.create(
+            user=self.viewer, empresa=self.company, role=self.directory_role,
+            status=UserCompanyProfile.Status.ACTIVE,
+        )
+
+    def test_member_without_directory_permission_cannot_list_or_read_colleagues(self):
+        client = APIClient()
+        client.force_authenticate(self.member)
+
+        self.assertEqual(client.get("/api/users/").status_code, 403)
+        self.assertEqual(client.get(f"/api/users/{self.target.pk}/").status_code, 403)
+        self.assertEqual(client.get(f"/api/users/{self.member.pk}/").status_code, 200)
+
+    def test_role_with_directory_permission_can_list_same_company_users(self):
+        client = APIClient()
+        client.force_authenticate(self.viewer)
+
+        response = client.get("/api/users/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual({item["id"] for item in response.data}, {self.viewer.id, self.member.id, self.target.id})

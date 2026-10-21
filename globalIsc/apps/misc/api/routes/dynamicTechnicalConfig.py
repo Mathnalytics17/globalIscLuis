@@ -22,6 +22,8 @@ urlpatterns = [
     path("technical-config/catalog-versions/", CatalogoTecnicoVersionViewSet.as_view({"get": "list", "post": "create"})),
     path("technical-config/catalog-versions/<int:pk>/", CatalogoTecnicoVersionViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"})),
     path("technical-config/catalog-versions/<int:pk>/restore/", CatalogoTecnicoVersionViewSet.as_view({"post": "restore"})),
+    path("technical-config/catalog-versions/<int:pk>/make-current/", CatalogoTecnicoVersionViewSet.as_view({"post": "make_current"})),
+    path("technical-config/catalog-versions/<int:pk>/deactivate/", CatalogoTecnicoVersionViewSet.as_view({"post": "deactivate"})),
 
     path("technical-config/sample-fields/", CampoTecnicoMuestraViewSet.as_view({"get": "list", "post": "create"})),
     path("technical-config/sample-fields/<int:pk>/", CampoTecnicoMuestraViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"})),

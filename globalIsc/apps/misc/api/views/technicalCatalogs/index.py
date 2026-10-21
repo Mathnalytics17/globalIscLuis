@@ -6,12 +6,14 @@ from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPer
 from apps.muestras.services.operational_audit import record_operational_event
 
 from apps.misc.api.models.technicalCatalogs.index import (
+    CategoriaUnidad,
     Condicion,
     EquipoPrueba,
     MetodoEquipo,
     Unidad,
 )
 from apps.misc.api.serializers.technicalCatalogs.index import (
+    CategoriaUnidadSerializer,
     CondicionSerializer,
     EquipoPruebaSerializer,
     MetodoEquipoSerializer,
@@ -102,9 +104,46 @@ class UnidadViewSet(BaseTechnicalCatalogViewSet):
         "destroy": "unidades.eliminar",
         "reactivate": "unidades.editar",
     }
-    queryset = Unidad.objects.all()
+    queryset = Unidad.objects.select_related("categoria")
     serializer_class = UnidadSerializer
-    search_fields = ["nombre", "simbolo", "magnitud", "descripcion"]
+    search_fields = ["nombre", "simbolo", "magnitud", "categoria__nombre", "descripcion"]
+
+
+class CategoriaUnidadViewSet(BaseTechnicalCatalogViewSet):
+    """Managed unit categories; shared by units instead of free-text labels."""
+
+    permission_action_map = {
+        "list": "unidades.ver",
+        "retrieve": "unidades.ver",
+        "create": "unidades.crear",
+        "update": "unidades.editar",
+        "partial_update": "unidades.editar",
+        "destroy": "unidades.eliminar",
+        "reactivate": "unidades.editar",
+    }
+    queryset = CategoriaUnidad.objects.all()
+    serializer_class = CategoriaUnidadSerializer
+    search_fields = ["nombre", "descripcion"]
+
+    def perform_update(self, serializer):
+        before = self._snapshot(serializer.instance)
+        instance = serializer.save()
+        # `magnitud` remains a compatibility label. Renaming a category must
+        # never leave old labels attached to the units that reference it.
+        if before.get("nombre") != instance.nombre:
+            Unidad.objects.filter(categoria=instance).update(magnitud=instance.nombre)
+        after = self._snapshot(instance)
+        if before != after:
+            self._record_event(instance, "configuracion.categoriaunidad.actualizada", "Categoría de unidad actualizada.", before, after)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.unidades.filter(activo=True).exists():
+            return Response(
+                {"detail": "No puede desactivar una categoría mientras tenga unidades activas. Reasigne o desactive esas unidades primero."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class MetodoEquipoViewSet(BaseTechnicalCatalogViewSet):
@@ -141,15 +180,20 @@ class CondicionViewSet(BaseTechnicalCatalogViewSet):
         "destroy": "condiciones.eliminar",
         "reactivate": "condiciones.editar",
     }
-    queryset = Condicion.objects.select_related("unidad")
+    queryset = Condicion.objects.select_related("unidad", "magnitud_categoria")
     serializer_class = CondicionSerializer
-    search_fields = ["nombre", "magnitud", "descripcion", "unidad__simbolo"]
+    search_fields = ["nombre", "magnitud", "magnitud_categoria__nombre", "descripcion", "unidad__simbolo"]
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        magnitud_categoria = self.request.query_params.get("magnitud_categoria")
         magnitud = self.request.query_params.get("magnitud")
 
-        if magnitud:
-            queryset = queryset.filter(magnitud=magnitud)
+        if magnitud_categoria:
+            queryset = queryset.filter(magnitud_categoria_id=magnitud_categoria)
+        elif magnitud:
+            # Legacy query parameter: retain it as a case-insensitive label
+            # filter while the foreign key is the source of truth.
+            queryset = queryset.filter(magnitud_categoria__nombre__iexact=magnitud)
 
         return queryset

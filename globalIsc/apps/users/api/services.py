@@ -505,8 +505,12 @@ def create_invitation(
     normalized_email = User.objects.normalize_email(email)
     if role is None:
         role = default_company_role()
-    if role is not None and role.scope != SecurityRole.Scope.COMPANY:
-        raise ValueError("Solo se pueden invitar usuarios externos con roles de empresa.")
+    if role is None or role.scope == SecurityRole.Scope.GLOBAL:
+        raise ValueError("El rol Global Oil no se asigna mediante invitación.")
+    if role.scope == SecurityRole.Scope.INTERNAL and not empresa.is_internal:
+        raise ValueError("Los roles internos solo se pueden invitar a la empresa interna Global Oil.")
+    if role.scope == SecurityRole.Scope.COMPANY and empresa.is_internal:
+        raise ValueError("Los roles de empresa deben invitarse a una empresa cliente, no a Global Oil.")
     UserInvitation.objects.filter(
         email__iexact=normalized_email,
         empresa=empresa,
@@ -517,7 +521,7 @@ def create_invitation(
         email=normalized_email,
         defaults={
             "empresa": empresa,
-            "role": User.Role.EMPRESA,
+            "role": role.legacy_role or User.Role.EMPRESA,
             "is_active": False,
             "email_verified": False,
             "access_status": User.AccessStatus.PENDING_INVITATION,
@@ -622,7 +626,7 @@ def accept_invitation(token, first_name, last_name, password, phone="", avatar=N
         user = User.objects.create_user(
             email=invitation.email,
             empresa=invitation.empresa,
-            role=User.Role.EMPRESA,
+            role=(invitation.role.legacy_role if invitation.role else User.Role.EMPRESA) or User.Role.EMPRESA,
         )
         invitation.user = user
 
@@ -644,6 +648,7 @@ def accept_invitation(token, first_name, last_name, password, phone="", avatar=N
     if avatar is not None:
         user.avatar = avatar
     user.empresa = invitation.empresa
+    user.role = (invitation.role.legacy_role if invitation.role else user.role) or user.role
     user.email_verified = True
     user.is_active = True
     user.access_status = User.AccessStatus.ACTIVE

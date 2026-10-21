@@ -53,13 +53,25 @@ def capabilities_for_batch(batch):
     completed = _count(batch, "pruebas_completadas_db", lambda: assignment_count("completed"))
     reviewed = _count(batch, "pruebas_revisadas_db", lambda: assignment_count("reviewed"))
 
+    # A rejected result is a controlled exception to the normal lock after a
+    # review.  It must be corrected from Result Entry and then sent through
+    # review again; reopening every result in a partially reviewed batch would
+    # be both unsafe and confusing.
+    has_invalidated_result = PruebaMuestra.objects.filter(
+        muestra__lote=batch,
+        estado_asignacion="confirmada",
+        resultados__estatus="rechazado",
+    ).exists()
+
     unlocked = batch.estado not in LOCKED_STATES
     all_entered = total_samples > 0 and entered_samples == total_samples
     has_review = reviewed > 0
     return BatchCapabilities(
         enter_lab=unlocked and total_samples > 0 and entered_samples == 0,
         assign_tests=unlocked and all_entered and not has_review,
-        enter_results=unlocked and all_entered and assigned > 0 and not has_review,
+        enter_results=unlocked and all_entered and assigned > 0 and (
+            not has_review or has_invalidated_result
+        ),
         review_results=unlocked and assigned > 0 and completed == assigned and reviewed < assigned,
         interpret_results=unlocked and assigned > 0 and reviewed == assigned,
     )

@@ -7,6 +7,7 @@ from apps.misc.api.models.pruebas.index import Prueba
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.muestras.index import Muestra
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
+from apps.resultado.api.models.index import Resultado
 from apps.muestras.api.services.workflow import capabilities_for_batch
 from apps.users.api.models.index import User
 
@@ -77,3 +78,38 @@ class BatchWorkflowTests(TestCase):
         self.batch.save(update_fields=["estado"])
 
         self.assertFalse(any(self.capabilities().values()))
+
+    def test_invalidated_result_can_be_corrected_after_other_tests_are_reviewed(self):
+        self.sample.is_ingresado = True
+        self.sample.save(update_fields=["is_ingresado"])
+        reviewed_assignment = PruebaMuestra.objects.create(
+            muestra=self.sample,
+            prueba=self.test,
+            usuario_solicitud=self.user,
+            estado_asignacion="confirmada",
+            completada=True,
+            is_revisada=True,
+            estatus="aprobado",
+        )
+        invalidated_test = Prueba.objects.create(
+            nombre_variable="Workflow invalidated",
+            acronimo="WORK-INV",
+        )
+        invalidated_assignment = PruebaMuestra.objects.create(
+            muestra=self.sample,
+            prueba=invalidated_test,
+            usuario_solicitud=self.user,
+            estado_asignacion="confirmada",
+            estatus="rechazado",
+        )
+        Resultado.objects.create(
+            prueba_muestra=invalidated_assignment,
+            resultado="11",
+            fecha_medicion=timezone.now(),
+            usuario_medicion=self.user,
+            estatus="rechazado",
+        )
+
+        capabilities = self.capabilities()
+        self.assertTrue(capabilities["ingresar_resultados"])
+        self.assertFalse(capabilities["interpretar_resultados"])
