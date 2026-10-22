@@ -139,3 +139,39 @@ class ResetToSecurityBaselineCommandTests(TestCase):
         self.assertTrue(SecurityRole.objects.filter(pk=self.role.pk).exists())
         self.assertTrue(SecurityPermission.objects.filter(pk=self.permission.pk).exists())
         self.assertTrue(SecurityRolePermission.objects.filter(role=self.role, permission=self.permission).exists())
+
+
+class ResetToUsersAndCompaniesTests(TestCase):
+    def setUp(self):
+        self.company = Empresa.objects.create(nombre="Empresa preservada")
+        self.user = User.objects.create_user(
+            email="preservado@example.com", password="test-password", empresa=self.company,
+        )
+        self.role = SecurityRole.objects.create(
+            name="Rol preservado", code="rol-para-reinicio", scope=SecurityRole.Scope.COMPANY,
+        )
+        UserCompanyProfile.objects.create(
+            user=self.user, empresa=self.company, role=self.role,
+            status=UserCompanyProfile.Status.ACTIVE,
+        )
+        machine = Maquina.objects.create(empresa=self.company, nombre="Activo temporal")
+        PuntoMuestreo.objects.create(maquina=machine, nombre="Punto temporal")
+        batch = LoteMuestras.objects.create(
+            id="L20267778", cliente_empresa=self.company,
+            fecha_envio=timezone.localdate(), usuario_registro=self.user,
+        )
+        Muestra.objects.create(
+            id="M20267778", lote=batch, fecha_toma=timezone.now(),
+            usuario_registro=self.user,
+        )
+
+    def test_reset_preserves_users_companies_and_memberships_only(self):
+        call_command("reset_to_users_and_companies", "--yes", stdout=StringIO())
+
+        self.assertTrue(Empresa.objects.filter(pk=self.company.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.user.pk, empresa=self.company).exists())
+        self.assertTrue(UserCompanyProfile.objects.filter(user=self.user, empresa=self.company).exists())
+        self.assertFalse(Maquina.objects.exists())
+        self.assertFalse(PuntoMuestreo.objects.exists())
+        self.assertFalse(LoteMuestras.objects.exists())
+        self.assertFalse(Muestra.objects.exists())
