@@ -77,7 +77,7 @@ class FolderViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 {'detail': 'No se puede eliminar una carpeta que contiene elementos.'},
                 status=status.HTTP_409_CONFLICT,
             )
-        if folder.machine_id:
+        if folder.machine_id and folder.machine.activo:
             return Response(
                 {'detail': 'Elimine la maquina asociada desde el endpoint de maquinas.'},
                 status=status.HTTP_409_CONFLICT,
@@ -220,6 +220,7 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         before = self._audit_snapshot(machine)
         machine.activo = True
         machine.save(update_fields=['activo'])
+        ensure_machine_tree_node(machine)
         record_operational_event(
             actor=request.user,
             action="maquina.reactivada",

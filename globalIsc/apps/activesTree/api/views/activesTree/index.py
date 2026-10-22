@@ -3,6 +3,7 @@ import logging
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.db.models import Q
 from permissions import ActionPermissionMixin, HasSecurityPermission
 from apps.users.api.models.index import User
 from apps.users.api.data_scope import scope_queryset
@@ -41,7 +42,7 @@ class ActivesTreeViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             # Obtener solo carpetas raíz y precargar toda la jerarquía
             queryset = Carpeta.objects.select_related('compania', 'machine', 'muestra').prefetch_related(
                 'machine__puntos_muestreo__lubricante_catalogo',
-            )
+            ).filter(Q(machine__isnull=True) | Q(machine__activo=True))
             user = request.user
             queryset = scope_queryset(queryset, user, "compania_id")
             folders = list(queryset.order_by('id'))

@@ -3,6 +3,7 @@ from rest_framework.test import APITestCase
 
 from apps.activesTree.api.models.index import Carpeta, PuntoMuestreo, AsignacionPuntoMuestreo
 from apps.activesTree.api.models.machines.index import Maquina
+from apps.activesTree.services import ensure_machine_tree_node
 from apps.misc.api.models.companies.index import Empresa
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.muestras.index import Muestra
@@ -97,6 +98,20 @@ class SamplingPointApiTests(APITestCase):
         node = Carpeta.objects.get(machine_id=response.data['id'])
         self.assertEqual(node.id_parent_node, str(drags.id))
         self.assertEqual(Carpeta.objects.filter(machine_id=response.data['id']).count(), 1)
+    def test_inactive_machine_node_is_hidden_and_can_be_removed(self):
+        node = ensure_machine_tree_node(self.machine)
+        self.machine.activo = False
+        self.machine.save(update_fields=['activo'])
+
+        tree = self.client.get('/api/actives-tree/basic-structure/')
+        self.assertEqual(tree.status_code, 200)
+        self.assertNotIn(str(self.machine.id), str(tree.data['structure']))
+
+        deleted = self.client.delete(f'/api/folders/{node.id}/')
+        self.assertEqual(deleted.status_code, 204)
+        self.assertFalse(Carpeta.objects.filter(pk=node.id).exists())
+        self.assertTrue(Maquina.objects.filter(pk=self.machine.id, activo=False).exists())
+
     def test_tree_always_exposes_company_name_for_legacy_root(self):
         root = Carpeta.objects.get(compania=self.company, typeFolder='root', id_parent_node='-1')
         # Simulates roots that were renamed through the legacy UI.
