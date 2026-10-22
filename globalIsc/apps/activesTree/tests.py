@@ -98,7 +98,6 @@ class SamplingPointApiTests(APITestCase):
         node = Carpeta.objects.get(machine_id=response.data['id'])
         self.assertEqual(node.id_parent_node, str(drags.id))
         self.assertEqual(Carpeta.objects.filter(machine_id=response.data['id']).count(), 1)
-
     def test_inactive_machine_node_is_hidden_and_can_be_removed(self):
         node = ensure_machine_tree_node(self.machine)
         self.machine.activo = False
