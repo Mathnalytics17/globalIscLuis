@@ -20,6 +20,7 @@ from apps.reporte.api.views.index import (
     _clean_limit_label,
     _report_limit_bands,
     _report_status,
+    _trend_chart_data_uri,
 )
 from apps.users.api.models.index import SecurityRole, User, UserCompanyProfile
 
@@ -79,6 +80,17 @@ class ReportSemaphoreTests(SimpleTestCase):
             _clean_limit_label("{'min_aceptable': 10, 'max_aceptable': 20}"),
             "Límite configurado",
         )
+
+    def test_trend_chart_is_embedded_as_a_pdf_safe_image(self):
+        chart = _trend_chart_data_uri("ESP · Espuma", [{
+            "label": "EI (ml/ml)",
+            "points": [
+                {"value": 2.0, "label": "01/10/2026"},
+                {"value": 4.0, "label": "10/10/2026"},
+            ],
+        }])
+
+        self.assertTrue(chart.startswith("data:image/png;base64,"))
 
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
@@ -204,6 +216,37 @@ class ReportEmailTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["generated"], 1)
         self.assertTrue(Reporte.objects.filter(muestra=self.sample, Responsable="Responsable del lote").exists())
+
+    def test_generate_batch_from_interpretation_handles_nine_samples_atomically(self):
+        """A production-size batch must not rebuild the whole lot per sample."""
+        self.user.is_superuser = True
+        self.user.is_active = True
+        self.user.save(update_fields=["is_superuser", "is_active"])
+        samples = [self.sample]
+        for number in range(1, 9):
+            samples.append(Muestra.objects.create(
+                id=f"M202698{number:02d}",
+                lote=self.batch,
+                fecha_toma=timezone.now(),
+                usuario_registro=self.user,
+            ))
+        for sample in samples:
+            sample.is_revisado = True
+            sample.campos_adicionales = {"interpretacion": {"conclusion": f"Muestra {sample.id} evaluada."}}
+            sample.save(update_fields=["is_revisado", "campos_adicionales"])
+
+        request = APIRequestFactory().post(
+            "/api/lubrication/reports/generate-batch-from-interpretation/",
+            {"lote": self.batch.id},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+        response = ReporteViewSet.as_view({"post": "generate_batch_from_interpretation"})(request)
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["generated"], 9)
+        self.assertEqual(Reporte.objects.filter(lote=self.batch).count(), 10)
+        self.assertEqual(len({report["consecutivo"] for report in response.data["reports"]}), 9)
 
     def test_tenant_sample_scope_excludes_another_company(self):
         other_company = Empresa.objects.create(nombre="Empresa ajena", email="ajena@example.com")

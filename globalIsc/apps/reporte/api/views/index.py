@@ -4,6 +4,7 @@ import logging
 import os
 import uuid
 import zipfile
+from collections import defaultdict
 from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import UUID
@@ -13,7 +14,7 @@ from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.mail import EmailMessage
 from django.db import transaction
-from django.db.models import Count, OuterRef, Q, Subquery
+from django.db.models import Count, Max, OuterRef, Q, Subquery
 from django.http import HttpResponse
 from django.template import Context, Template
 from django.template.loader import get_template
@@ -36,13 +37,18 @@ from apps.reporte.api.serializers.index import (
     ReporteSerializer,
     ReporteSummarySerializer,
 )
-from apps.resultado.api.views.index import _sample_tests_for_lote
+from apps.resultado.api.views.index import (
+    _active_result_for,
+    _flatten_payload_values,
+    _safe_json_loads,
+    _sample_tests_for_lote,
+)
 from apps.resultado.api.models.index import VersionInterpretacion
 from apps.users.api.models.index import User
 from apps.users.api.data_scope import scope_queryset, scope_released_reports_queryset
 from apps.users.api.services import audit_user_action
 from apps.muestras.services.operational_audit import record_operational_event
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +181,144 @@ def _format_report_date(value):
         return value.strftime("%d/%m/%Y")
     except Exception:
         return str(value)
+
+
+def _trend_chart_data_uri(title, series):
+    """Build a self-contained PNG chart that xhtml2pdf can render reliably.
+
+    The report renderer deliberately does not call the web application while
+    producing a PDF.  Embedding a small PNG also keeps an immutable visual
+    snapshot with the report instead of relying on a future chart endpoint.
+    """
+    width, height = 760, 270
+    left, top, right, bottom = 58, 35, 18, 44
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default()
+    colors = ["#d71920", "#1368aa", "#20a35a", "#9b51e0", "#e67e22", "#008b8b"]
+
+    values = [point["value"] for item in series for point in item["points"]]
+    if not values:
+        return ""
+    minimum, maximum = min(values), max(values)
+    if minimum == maximum:
+        padding = max(1, abs(minimum) * 0.1)
+        minimum -= padding
+        maximum += padding
+    else:
+        padding = (maximum - minimum) * 0.08
+        minimum -= padding
+        maximum += padding
+
+    chart_width = width - left - right
+    chart_height = height - top - bottom
+    draw.text((left, 10), title, fill="#111111", font=font)
+    draw.line((left, top, left, top + chart_height), fill="#666666", width=1)
+    draw.line((left, top + chart_height, left + chart_width, top + chart_height), fill="#666666", width=1)
+    for step in range(5):
+        y = top + (chart_height * step / 4)
+        value = maximum - ((maximum - minimum) * step / 4)
+        draw.line((left, y, left + chart_width, y), fill="#e5e7eb", width=1)
+        draw.text((3, y - 5), f"{value:.2f}", fill="#555555", font=font)
+
+    total_points = max(len(item["points"]) for item in series)
+    for series_index, item in enumerate(series):
+        points = item["points"]
+        color = colors[series_index % len(colors)]
+        coordinates = []
+        for index, point in enumerate(points):
+            x = left + (chart_width * index / max(total_points - 1, 1))
+            y = top + chart_height - ((point["value"] - minimum) / (maximum - minimum) * chart_height)
+            coordinates.append((x, y))
+        if len(coordinates) > 1:
+            draw.line(coordinates, fill=color, width=2)
+        for x, y in coordinates:
+            draw.ellipse((x - 3, y - 3, x + 3, y + 3), fill=color)
+
+        legend_y = top + 4 + (series_index * 13)
+        draw.rectangle((left + chart_width - 178, legend_y, left + chart_width - 171, legend_y + 7), fill=color)
+        draw.text((left + chart_width - 166, legend_y - 2), item["label"][:28], fill="#222222", font=font)
+
+    labels = series[0]["points"]
+    if labels:
+        draw.text((left, height - 25), labels[0]["label"][:14], fill="#555555", font=font)
+        draw.text((left + chart_width - 88, height - 25), labels[-1]["label"][:14], fill="#555555", font=font)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return f"data:image/png;base64,{base64.b64encode(buffer.getvalue()).decode('ascii')}"
+
+
+def _report_trend_charts(muestra, selected_tests):
+    """Return compact numeric trends for the report's selected tests only."""
+    if not selected_tests or not muestra.lote_id:
+        return []
+
+    from apps.activesTree.api.models.index import AsignacionPuntoMuestreo
+    from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
+
+    related_samples = Muestra.objects.filter(lote__cliente_empresa=muestra.lote.cliente_empresa)
+    point_assignment = (
+        AsignacionPuntoMuestreo.objects.filter(muestra=muestra, activa=True)
+        .select_related("punto_muestreo")
+        .first()
+    )
+    scope_label = "punto de medición"
+    if point_assignment:
+        related_samples = related_samples.filter(
+            asignaciones_punto_muestreo__punto_muestreo_id=point_assignment.punto_muestreo_id,
+            asignaciones_punto_muestreo__activa=True,
+        )
+    elif muestra.referencia_equipo_id:
+        scope_label = "máquina"
+        related_samples = related_samples.filter(referencia_equipo_id=muestra.referencia_equipo_id)
+    else:
+        scope_label = "equipo"
+        related_samples = related_samples.filter(equipo_placa=muestra.equipo_placa)
+
+    sample_ids = list(related_samples.order_by("-fecha_toma", "-id").values_list("id", flat=True)[:100])
+    rows = (
+        PruebaMuestra.objects.filter(
+            muestra_id__in=sample_ids,
+            estado_asignacion="confirmada",
+            prueba__acronimo__in=selected_tests,
+            resultados__isnull=False,
+        )
+        .select_related("muestra", "prueba")
+        .prefetch_related("resultados")
+        .distinct()
+        .order_by("muestra__fecha_toma", "muestra_id", "prueba__acronimo")
+    )
+    grouped = defaultdict(lambda: defaultdict(list))
+    titles = {}
+    for row in rows:
+        result = _active_result_for(row)
+        payload = _safe_json_loads(result.resultado) if result else {}
+        for item in _flatten_payload_values(payload):
+            raw_value = item.get("value")
+            try:
+                value = float(str(raw_value).replace(",", "."))
+            except (TypeError, ValueError):
+                continue
+            field_label = item.get("componente_nombre") or item.get("label") or item.get("key") or "Valor"
+            unit = item.get("unidad") or ""
+            key = f"{field_label} ({unit})" if unit else field_label
+            grouped[row.prueba.acronimo][key].append({
+                "value": value,
+                "label": row.muestra.fecha_toma.strftime("%d/%m/%Y") if row.muestra.fecha_toma else row.muestra_id,
+            })
+            titles[row.prueba.acronimo] = row.prueba.nombre_variable or row.prueba.acronimo
+
+    charts = []
+    for acronym in selected_tests:
+        fields = grouped.get(acronym, {})
+        series = [{"label": label, "points": points} for label, points in fields.items() if points]
+        if not series:
+            continue
+        title = f"{acronym} · {titles.get(acronym, acronym)}"
+        image = _trend_chart_data_uri(title, series)
+        if image:
+            charts.append({"title": title, "scope": scope_label, "image": image})
+    return charts
 
 
 def _split_result_for_report(result_text):
@@ -686,10 +830,11 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         )
         return Response({"detail": "Reporte anulado."})
 
-    def _build_snapshot(self, muestra, request_user):
+    def _build_snapshot(self, muestra, request_user, tests=None):
         lote = muestra.lote
         interpretation = _interpretation_from_sample(muestra)
-        tests = [item for item in _sample_tests_for_lote(lote) if item["muestra"] == muestra.id] if lote else []
+        if tests is None:
+            tests = [item for item in _sample_tests_for_lote(lote) if item["muestra"] == muestra.id] if lote else []
         equipo = getattr(muestra, "referencia_equipo", None)
         empresa = getattr(lote, "cliente_empresa", None) if lote else None
 
@@ -746,6 +891,12 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "graficas": {
                 "activas": interpretation.get("graficas_activas", False),
                 "seleccionadas": interpretation.get("graficas_seleccionadas") or [],
+                # El informe almacena la imagen ya renderizada. Así la gráfica
+                # representa exactamente el histórico disponible al emitirlo.
+                "charts": _report_trend_charts(
+                    muestra,
+                    interpretation.get("graficas_seleccionadas") or [],
+                ) if interpretation.get("graficas_activas", False) else [],
             },
             "interpretacion": interpretation,
         }
@@ -760,10 +911,10 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         )
         return (last or 0) + 1
 
-    def _create_from_interpretation(self, muestra, request):
-        version = self._next_version(muestra.id)
-        interpretation_version = _interpretation_version_for_report(muestra, request.user)
-        snapshot = self._build_snapshot(muestra, request.user)
+    def _create_from_interpretation(self, muestra, request, *, tests=None, version=None, interpretation_version=None):
+        version = version or self._next_version(muestra.id)
+        interpretation_version = interpretation_version or _interpretation_version_for_report(muestra, request.user)
+        snapshot = self._build_snapshot(muestra, request.user, tests=tests)
         snapshot["version"] = version
         if interpretation_version:
             snapshot["interpretacion_version"] = {
@@ -842,23 +993,67 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         lote_id = request.data.get("lote") or request.data.get("lote_id")
         if not lote_id:
             return Response({"detail": "Debe enviar el lote."}, status=status.HTTP_400_BAD_REQUEST)
-        lote = self._tenant_batches_queryset().filter(pk=lote_id).first()
-        if not lote:
-            return Response({"detail": "Lote no encontrado."}, status=status.HTTP_404_NOT_FOUND)
-        samples = list(self._tenant_samples_queryset().filter(
-            lote=lote, estado_operativo="activa"
-        ).order_by("id"))
-        not_reviewed = [sample.id for sample in samples if not sample.is_revisado]
-        without_interpretation = [sample.id for sample in samples if not _has_interpretation(sample)]
-        if not_reviewed or without_interpretation:
-            return Response({
-                "detail": "No se puede generar el lote completo hasta que todas las muestras estén revisadas y tengan contenido de interpretación guardado.",
-                "muestras_sin_revision": not_reviewed,
-                "muestras_sin_interpretacion": without_interpretation,
-            }, status=status.HTTP_400_BAD_REQUEST)
-
         with transaction.atomic():
-            reports = [self._create_from_interpretation(sample, request) for sample in samples]
+            # El lote y sus muestras se bloquean durante la generación. Evita
+            # crear dos versiones concurrentes y, sobre todo, hace que el
+            # resultado sea atómico: o nacen todos los reportes o ninguno.
+            # El queryset de alcance trae relaciones opcionales; bloquearlas
+            # también hace que PostgreSQL rechace FOR UPDATE sobre un LEFT JOIN.
+            # Solo necesitamos serializar la fila del lote.
+            lote = (
+                self._tenant_batches_queryset()
+                .select_related(None)
+                .select_for_update(of=("self",))
+                .filter(pk=lote_id)
+                .first()
+            )
+            if not lote:
+                return Response({"detail": "Lote no encontrado."}, status=status.HTTP_404_NOT_FOUND)
+            samples = list(
+                self._tenant_samples_queryset()
+                .select_related(None)
+                .select_for_update(of=("self",))
+                .filter(lote=lote, estado_operativo="activa")
+                .order_by("id")
+            )
+            not_reviewed = [sample.id for sample in samples if not sample.is_revisado]
+            without_interpretation = [sample.id for sample in samples if not _has_interpretation(sample)]
+            if not_reviewed or without_interpretation:
+                return Response({
+                    "detail": "No se puede generar el lote completo hasta que todas las muestras estén revisadas y tengan contenido de interpretación guardado.",
+                    "muestras_sin_revision": not_reviewed,
+                    "muestras_sin_interpretacion": without_interpretation,
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Antes se reconstruía y evaluaba TODO el lote por cada muestra.
+            # Con nueve muestras eso multiplicaba consultas, serialización y
+            # evaluación de límites por nueve. Se prepara una vez y se divide.
+            tests_by_sample = defaultdict(list)
+            for test in _sample_tests_for_lote(lote):
+                tests_by_sample[test["muestra"]].append(test)
+
+            latest_report_versions = {
+                row["muestra_id"]: row["latest_version"]
+                for row in Reporte.objects.filter(muestra__in=samples)
+                .values("muestra_id")
+                .annotate(latest_version=Max("version"))
+            }
+            latest_interpretations = {}
+            for interpretation in (
+                VersionInterpretacion.objects.filter(muestra__in=samples)
+                .order_by("muestra_id", "-version", "-id")
+            ):
+                latest_interpretations.setdefault(interpretation.muestra_id, interpretation)
+
+            reports = []
+            for sample in samples:
+                reports.append(self._create_from_interpretation(
+                    sample,
+                    request,
+                    tests=tests_by_sample.get(sample.id, []),
+                    version=(latest_report_versions.get(sample.id) or 0) + 1,
+                    interpretation_version=latest_interpretations.get(sample.id),
+                ))
             _mark_lote_reported_if_ready(lote)
         audit_user_action(request, "report.batch_generated", metadata={"batch_id": lote.pk, "report_count": len(reports)})
         record_operational_event(
@@ -1738,6 +1933,9 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
         comments = (comentarios.get("predefinidos") or []) + (comentarios.get("manuales") or [])
         conclusion = comentarios.get("conclusion") or reporte.conclusiones or ""
+        trend_charts = (
+            (snapshot.get("graficas") or {}).get("charts") or []
+        )
 
         firma_url = getattr(reporte, "firma_ruta", None) or ""
         firma_src = ""
@@ -1793,6 +1991,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "fecha_emision": reporte.fecha_emision.strftime("%d/%m/%Y") if reporte.fecha_emision else "N/A",
             "muestra": muestra,
             "fecha_toma": _format_report_date(muestra.get("fecha_toma")),
+            "trend_charts": trend_charts,
         }
 
     def _estado_reporte(self, estado_limite):
