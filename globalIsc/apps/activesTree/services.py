@@ -46,12 +46,14 @@ def ensure_active_company_roots():
         ensure_company_root(company)
 
 
-def ensure_machine_tree_node(machine):
+def ensure_machine_tree_node(machine, parent_folder=None):
     """Expose a machine in its company's asset tree without relocating it.
 
-    New machines are placed directly below the company root. If a node already
-    exists, its current parent is intentionally preserved: the customer may
-    have moved it into a meaningful folder after its initial reception.
+    New machines are placed in ``parent_folder`` when the caller explicitly
+    selected one; otherwise they are placed directly below the company root.
+    If a node already exists, its current parent is intentionally preserved:
+    the customer may have moved it into a meaningful folder after its initial
+    reception.
     """
     root = ensure_company_root(machine.empresa)
     node = _preferred_machine_node(
@@ -60,11 +62,12 @@ def ensure_machine_tree_node(machine):
     )
     if node:
         return node
+    parent_id = parent_folder.id if parent_folder else root.id
     return Carpeta.objects.create(
         nombre=machine.nombre,
         compania=machine.empresa,
         typeFolder='machine',
-        id_parent_node=str(root.id),
+        id_parent_node=str(parent_id),
         isMachine=True,
         is_pt_medida=False,
         machine=machine,

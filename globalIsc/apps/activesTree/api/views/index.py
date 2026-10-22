@@ -160,18 +160,23 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         ))
 
     def perform_create(self, serializer):
-        machine = serializer.save()
-        ensure_machine_tree_node(machine)
-        record_operational_event(
-            actor=self.request.user,
-            action="maquina.creada",
-            entity_type="maquina",
-            entity_id=machine.id,
-            entity_label=machine.nombre,
-            maquina=machine,
-            detail="Máquina creada.",
-            after=self._audit_snapshot(machine),
-        )
+        # La máquina y su nodo visual deben nacer juntos. Antes el frontend
+        # creaba la máquina (que quedaba en la raíz) y luego intentaba moverla
+        # creando otro nodo, dejando un activo mal ubicado si esa segunda
+        # solicitud fallaba.
+        with transaction.atomic():
+            machine = serializer.save()
+            ensure_machine_tree_node(machine, parent_folder=serializer.parent_folder)
+            record_operational_event(
+                actor=self.request.user,
+                action="maquina.creada",
+                entity_type="maquina",
+                entity_id=machine.id,
+                entity_label=machine.nombre,
+                maquina=machine,
+                detail="Máquina creada.",
+                after=self._audit_snapshot(machine),
+            )
 
     def perform_update(self, serializer):
         before = self._audit_snapshot(serializer.instance)
