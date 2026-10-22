@@ -430,6 +430,19 @@ def _ordered_gap(start, end):
 def _report_limit_bands(detail):
     value = detail.get("limit_value")
     unit = detail.get("unit") or ""
+    # Snapshots created before the current evaluator sometimes persisted the
+    # structured criterion as JSON text.  Rendering that text verbatim made a
+    # report expose implementation keys (max_aceptable, usar_amarillo, ...)
+    # instead of a readable technical range.
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate.startswith("{") and candidate.endswith("}"):
+            try:
+                parsed_value = json.loads(candidate)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                parsed_value = None
+            if isinstance(parsed_value, dict):
+                value = parsed_value
     if isinstance(value, dict):
         acceptable = _report_range(value.get("min_aceptable"), value.get("max_aceptable"), unit)
         if not acceptable and value.get("valor_esperado") not in [None, ""]:
@@ -452,7 +465,7 @@ def _report_limit_bands(detail):
         if value.get("max_critico") not in [None, ""]:
             critical.append(f"Mayor que {value['max_critico']}{suffix}")
         return {
-            "acceptable": acceptable or "Configurado",
+            "acceptable": acceptable or "Criterio técnico configurado",
             "warning": "; o ".join(warning),
             "critical": "; o ".join(critical),
         }
@@ -461,7 +474,7 @@ def _report_limit_bands(detail):
     if display_value in [None, ""]:
         display_value = value
     if display_value in [None, ""]:
-        return {"acceptable": "No aplica", "warning": "", "critical": ""}
+        return {"acceptable": "Sin límite técnico", "warning": "", "critical": ""}
     suffix = f" {unit}" if unit else ""
     operator = detail.get("operator")
     operator_label = {

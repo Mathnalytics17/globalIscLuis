@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -6,10 +8,15 @@ from apps.users.api.models.index import User
 from apps.users.api.data_scope import scope_queryset
 from apps.activesTree.api.serializers.activesTree.index import RecursiveFolderSerializer
 from apps.activesTree.api.models.index import Carpeta
-from apps.activesTree.services import ensure_active_company_roots
+from apps.activesTree.services import ensure_active_company_roots, _preferred_machine_node
 from collections import defaultdict
 
 from rest_framework.decorators import action
+
+
+logger = logging.getLogger(__name__)
+
+
 class ActivesTreeViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     """
     API para estructura básica de carpetas
@@ -38,6 +45,26 @@ class ActivesTreeViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             user = request.user
             queryset = scope_queryset(queryset, user, "compania_id")
             folders = list(queryset.order_by('id'))
+            # Old imports could leave two visual nodes pointing to the same
+            # machine.  Do not render a duplicate while the data is awaiting
+            # the permanent reconciliation migration/command.
+            root_ids = {
+                folder.compania_id: folder.id
+                for folder in folders
+                if folder.typeFolder == 'root' and str(folder.id_parent_node) == '-1'
+            }
+            machine_nodes = defaultdict(list)
+            for folder in folders:
+                if folder.machine_id:
+                    machine_nodes[folder.machine_id].append(folder)
+            duplicate_node_ids = set()
+            for nodes in machine_nodes.values():
+                if len(nodes) > 1:
+                    root_id = root_ids.get(nodes[0].compania_id)
+                    keep = _preferred_machine_node(nodes, root_id)
+                    duplicate_node_ids.update(node.id for node in nodes if node.id != keep.id)
+            if duplicate_node_ids:
+                folders = [folder for folder in folders if folder.id not in duplicate_node_ids]
             children_by_parent = defaultdict(list)
             for folder in folders:
                 children_by_parent[folder.id_parent_node].append(folder)
