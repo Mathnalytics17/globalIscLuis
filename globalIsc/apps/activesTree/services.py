@@ -9,17 +9,31 @@ from apps.activesTree.api.models.index import Carpeta
 
 def ensure_company_root(company):
     """Cada empresa tiene siempre una raíz, sin requerir una acción de UI."""
-    root, created = Carpeta.objects.get_or_create(
+    roots = list(Carpeta.objects.filter(
         compania=company,
         typeFolder='root',
         id_parent_node='-1',
-        defaults={
-            'nombre': company.nombre,
-            'isMachine': False,
-            'is_pt_medida': False,
-        },
-    )
-    if not created and root.nombre != company.nombre:
+    ).order_by('id'))
+    if roots:
+        root = roots[0]
+        # Legacy imports could create more than one root.  A plain
+        # get_or_create raises MultipleObjectsReturned here, which used to
+        # turn an otherwise valid machine creation into a 500 response.
+        for duplicate in roots[1:]:
+            Carpeta.objects.filter(id_parent_node=str(duplicate.id)).update(
+                id_parent_node=str(root.id)
+            )
+            duplicate.delete()
+    else:
+        root = Carpeta.objects.create(
+            compania=company,
+            typeFolder='root',
+            id_parent_node='-1',
+            nombre=company.nombre,
+            isMachine=False,
+            is_pt_medida=False,
+        )
+    if root.nombre != company.nombre:
         root.nombre = company.nombre
         root.save(update_fields=['nombre'])
     return root
