@@ -138,7 +138,7 @@ def _sync_sample_completion_from_tests(muestra):
         muestra.save(update_fields=updates)
 
 
-def _mark_interpretation_pending_review_after_correction(muestra, resultado_id):
+def _mark_interpretation_pending_review_after_correction(muestra, resultado_id=None):
     """Replace the stale invalidation flag once the result has been corrected.
 
     A correction is not immediately interpretable: it still needs a new
@@ -151,12 +151,36 @@ def _mark_interpretation_pending_review_after_correction(muestra, resultado_id):
     if interpretation.get("estado") != "requiere_revision":
         return
     invalidated_result_id = interpretation.get("resultado_invalidado_id")
-    if invalidated_result_id and str(invalidated_result_id) != str(resultado_id):
+    if (
+        resultado_id is not None
+        and invalidated_result_id
+        and str(invalidated_result_id) != str(resultado_id)
+    ):
         return
     interpretation.pop("invalidada_por_resultado", None)
     interpretation.pop("motivo_invalidacion_resultado", None)
     interpretation.pop("resultado_invalidado_id", None)
     interpretation["estado"] = "pendiente_revision"
+    extra["interpretacion"] = interpretation
+    muestra.campos_adicionales = extra
+    muestra.save(update_fields=["campos_adicionales"])
+
+
+def _clear_interpretation_pending_review_after_review(muestra):
+    """Release the transitional correction marker after the new review.
+
+    ``pendiente_revision`` is only meaningful between the correction and the
+    next complete review of the sample.  Leaving it in the persisted JSON
+    after that review made Interpretation display a warning that no longer
+    matched the workflow state.
+    """
+    if not muestra or not muestra.is_revisado:
+        return
+    extra = muestra.campos_adicionales if isinstance(muestra.campos_adicionales, dict) else {}
+    interpretation = extra.get("interpretacion") if isinstance(extra.get("interpretacion"), dict) else {}
+    if interpretation.get("estado") != "pendiente_revision":
+        return
+    interpretation.pop("estado", None)
     extra["interpretacion"] = interpretation
     muestra.campos_adicionales = extra
     muestra.save(update_fields=["campos_adicionales"])
@@ -1320,6 +1344,24 @@ def _batch_review_payload(lote):
     for muestra in lote.muestras.select_related("referencia_equipo").all().order_by("id"):
         sample_tests = [item for item in tests if item["muestra"] == muestra.id]
         interpretation = _get_interpretation_data(muestra)
+        # Reconcile legacy/stale invalidation metadata. The active result is
+        # the source of truth: once no test is rejected, interpretation must
+        # wait for review instead of displaying a false hard block.
+        if (
+            interpretation.get("estado") == "requiere_revision"
+            and not any(item.get("resultado_invalidado") for item in sample_tests)
+        ):
+            _mark_interpretation_pending_review_after_correction(muestra)
+            interpretation = _get_interpretation_data(muestra)
+        if (
+            interpretation.get("estado") == "pendiente_revision"
+            and muestra.is_revisado
+        ):
+            # This payload drives both Review and Report preparation.  Repair
+            # the legacy transition marker here too, so those screens cannot
+            # keep showing a completed review as if it were still pending.
+            _clear_interpretation_pending_review_after_review(muestra)
+            interpretation = _get_interpretation_data(muestra)
         has_interpretation = bool(
             interpretation.get("conclusion")
             or interpretation.get("comentarios_predefinidos")
@@ -3099,6 +3141,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         muestra = prueba_muestra.muestra
         _sync_sample_completion_from_tests(muestra)
         if muestra.is_revisado and muestra.lote:
+            _clear_interpretation_pending_review_after_review(muestra)
             muestra.lote.recalcular_estado(save=True)
 
         record_operational_event(
@@ -3174,6 +3217,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
         for muestra in lote.muestras.all():
             _sync_sample_completion_from_tests(muestra)
+            _clear_interpretation_pending_review_after_review(muestra)
 
         lote.recalcular_estado(save=True)
         record_operational_event(
@@ -3247,6 +3291,21 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 "resultado_invalidado_id": (invalidated_test.get("resultado") or {}).get("id"),
                 "prueba_invalidada": (invalidated_test.get("prueba") or {}).get("acronimo"),
             }
+        elif interpretation.get("estado") == "requiere_revision":
+            # An older correction may have persisted the result successfully
+            # but left the JSON marker behind. Repair it on read so the user
+            # sees the actual next step (review), never a fictional block.
+            _mark_interpretation_pending_review_after_correction(muestra)
+            interpretation = _get_interpretation_data(muestra)
+        elif (
+            interpretation.get("estado") == "pendiente_revision"
+            and muestra.is_revisado
+        ):
+            # Repair records corrected before the transition marker was
+            # cleared at review time.  A fully reviewed sample must remain
+            # editable and reportable.
+            _clear_interpretation_pending_review_after_review(muestra)
+            interpretation = _get_interpretation_data(muestra)
         point_assignment = next(
             (item for item in muestra.asignaciones_punto_muestreo.all() if item.activa),
             None,
