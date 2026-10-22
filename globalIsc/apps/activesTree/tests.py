@@ -79,6 +79,26 @@ class SamplingPointApiTests(APITestCase):
         self.assertNotEqual(other_machine.empresa_id, self.machine.empresa_id)
         self.assertTrue(Carpeta.objects.filter(machine=other_machine).exists())
 
+    def test_machine_is_created_in_selected_folder(self):
+        root = Carpeta.objects.get(compania=self.company, typeFolder='root', id_parent_node='-1')
+        drags = Carpeta.objects.create(
+            compania=self.company,
+            nombre='Dragas',
+            typeFolder='folder',
+            id_parent_node=str(root.id),
+        )
+
+        response = self.client.post('/api/machines/', {
+            'empresa': self.company.id,
+            'nombre': 'Draga creada en carpeta',
+            'parent_folder': drags.id,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201, response.data)
+        node = Carpeta.objects.get(machine_id=response.data['id'])
+        self.assertEqual(node.id_parent_node, str(drags.id))
+        self.assertEqual(Carpeta.objects.filter(machine_id=response.data['id']).count(), 1)
+
     def test_inactive_machine_node_is_hidden_and_can_be_removed(self):
         node = ensure_machine_tree_node(self.machine)
         self.machine.activo = False

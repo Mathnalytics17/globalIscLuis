@@ -11,6 +11,9 @@ class MaquinaSerializer(serializers.ModelSerializer):
     empresa_info = serializers.SerializerMethodField(read_only=True)
     ubicacion_activo = serializers.SerializerMethodField(read_only=True)
     puntos_muestreo_activos = serializers.SerializerMethodField(read_only=True)
+    parent_folder = serializers.PrimaryKeyRelatedField(
+        queryset=Carpeta.objects.all(), write_only=True, required=False,
+    )
 
     class Meta:
         model = Maquina
@@ -55,10 +58,24 @@ class MaquinaSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         empresa = attrs.get('empresa') or getattr(self.instance, 'empresa', None)
+        parent_folder = attrs.get('parent_folder')
         request = self.context.get('request')
         if empresa and request and not can_access_company(request.user, empresa.id):
             raise serializers.ValidationError({'empresa': 'No tiene acceso a esta empresa.'})
+        if parent_folder:
+            if parent_folder.compania_id != empresa.id:
+                raise serializers.ValidationError({
+                    'parent_folder': 'La carpeta destino debe pertenecer a la empresa seleccionada.'
+                })
+            if parent_folder.typeFolder not in {'root', 'folder'}:
+                raise serializers.ValidationError({
+                    'parent_folder': 'La carpeta destino debe ser una carpeta de agrupación.'
+                })
         return attrs
+
+    def create(self, validated_data):
+        self.parent_folder = validated_data.pop('parent_folder', None)
+        return super().create(validated_data)
 
 
 class MaquinaConMuestrasSerializer(MaquinaSerializer):
