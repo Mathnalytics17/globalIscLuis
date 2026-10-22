@@ -171,14 +171,14 @@
     width: 5%;
   }
 
-  .limit-col {
-    width: 15%;
-    font-size: 6.35pt;
-    line-height: 0.98;
+  .bands-col {
+    width: 29%;
+    font-size: 6.8pt;
+    line-height: 1.08;
   }
 
   .comment-col {
-    width: 11%;
+    width: 12%;
     font-weight: bold;
     font-size: 7pt;
     line-height: 0.98;
@@ -248,6 +248,18 @@
   .result-layout .layout-break {
     display: block;
     height: 2px;
+  }
+
+  .band-line {
+    display: block;
+    padding: 1.2px 2px;
+    margin: 1px 0;
+  }
+
+  .band-title {
+    display: inline-block;
+    min-width: 44px;
+    font-weight: bold;
   }
 
   .band-label {
@@ -468,9 +480,7 @@
         <th class="method-col">MÉTODO</th>
         <th class="result-col">RESULTADO</th>
         <th class="unit-col">UNIDADES</th>
-        <th class="limit-col band-green">ACEPTABLE</th>
-        <th class="limit-col band-yellow">ALERTA</th>
-        <th class="limit-col band-red">CRÍTICO</th>
+        <th class="bands-col">BANDAS DE EVALUACIÓN</th>
         <th class="comment-col">ESTADO</th>
       </tr>
     </thead>
@@ -506,9 +516,11 @@
                 {% endif %}
               </td>
               <td class="unit-col">{{ row.unidad|default:"-" }}</td>
-              <td class="limit-col">{{ row.limite_aceptable|default:row.limite|default:"-" }}</td>
-              <td class="limit-col">{{ row.limite_alerta|default:"-" }}</td>
-              <td class="limit-col">{{ row.limite_critico|default:"-" }}</td>
+              <td class="bands-col">
+                <span class="band-line band-green"><strong>Aceptable:</strong>&nbsp;{{ row.limite_aceptable|default:row.limite|default:"Sin límite técnico" }}</span>
+                {% if row.limite_alerta %}<span class="band-line band-yellow"><strong>Alerta:</strong>&nbsp;{{ row.limite_alerta }}</span>{% endif %}
+                {% if row.limite_critico %}<span class="band-line band-red"><strong>Crítico:</strong>&nbsp;{{ row.limite_critico }}</span>{% endif %}
+              </td>
               <td class="comment-col center status-{{ row.comentario_class }}">
                 {{ row.comentario|default:"PENDIENTE" }}
                 {% if row.comentario_detalle %}<span class="status-detail">{{ row.comentario_detalle }}</span>{% endif %}
@@ -543,9 +555,11 @@
                 {% endif %}
               </td>
               <td class="unit-col">{{ prueba.unidad|default:"-" }}</td>
-              <td class="limit-col">{{ prueba.limite_aceptable|default:prueba.limite|default:"-" }}</td>
-              <td class="limit-col">{{ prueba.limite_alerta|default:"-" }}</td>
-              <td class="limit-col">{{ prueba.limite_critico|default:"-" }}</td>
+              <td class="bands-col">
+                <span class="band-line band-green"><strong>Aceptable:</strong>&nbsp;{{ prueba.limite_aceptable|default:prueba.limite|default:"Sin límite técnico" }}</span>
+                {% if prueba.limite_alerta %}<span class="band-line band-yellow"><strong>Alerta:</strong>&nbsp;{{ prueba.limite_alerta }}</span>{% endif %}
+                {% if prueba.limite_critico %}<span class="band-line band-red"><strong>Crítico:</strong>&nbsp;{{ prueba.limite_critico }}</span>{% endif %}
+              </td>
               <td class="comment-col center status-{{ prueba.comentario_class }}">
                 {{ prueba.comentario|default:"PENDIENTE" }}
                 {% if prueba.comentario_detalle %}<span class="status-detail">{{ prueba.comentario_detalle }}</span>{% endif %}
@@ -556,17 +570,6 @@
       {% endfor %}
     </tbody>
   </table>
-
-  {% if trend_charts %}
-    <div class="trends-section">
-      <div class="trend-title">TENDENCIAS HISTÓRICAS</div>
-      <div class="trend-subtitle">Histórico disponible al emitir este informe, con alcance por {{ trend_charts.0.scope }}.</div>
-      {% for chart in trend_charts %}
-        <div class="trend-title" style="font-size: 8.5pt;">{{ chart.title }}</div>
-        <img class="trend-chart" src="{{ chart.image }}">
-      {% endfor %}
-    </div>
-  {% endif %}
 
   <table class="comments-section">
     <tr>
@@ -604,6 +607,17 @@
       <td>Las propiedades descritas en este reporte corresponden a las de la muestra suministrada.</td>
     </tr>
   </table>
+
+  {% if trend_charts %}
+    <div class="trends-section">
+      <div class="trend-title">TENDENCIAS HISTÓRICAS</div>
+      <div class="trend-subtitle">Histórico disponible al emitir este informe, con alcance por {{ trend_charts.0.scope }}.</div>
+      {% for chart in trend_charts %}
+        <div class="trend-title" style="font-size: 8.5pt;">{{ chart.title }}</div>
+        <img class="trend-chart" src="{{ chart.image }}">
+      {% endfor %}
+    </div>
+  {% endif %}
 
 </div>
 </body>
