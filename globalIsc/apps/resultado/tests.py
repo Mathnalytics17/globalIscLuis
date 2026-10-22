@@ -465,6 +465,18 @@ class ResultEntryTests(TestCase):
         self.assertEqual(detail.status_code, 200, detail.data)
         self.assertEqual(detail.data["interpretacion"]["estado"], "pendiente_revision")
 
+        reviewed = self.client.post(
+            f"/api/lubrication/review-results/sample-tests/{self.sample_test.id}/mark-reviewed/",
+            {},
+            format="json",
+        )
+        self.assertEqual(reviewed.status_code, 200, reviewed.data)
+        self.muestra.refresh_from_db()
+        self.assertNotIn("estado", self.muestra.campos_adicionales["interpretacion"])
+        detail = self.client.get(f"/api/lubrication/interpretation/samples/{self.muestra.id}/")
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertNotIn("estado", detail.data["interpretacion"])
+
     def test_interpretation_trends_orders_by_existing_test_fields(self):
         form = self.client.get(
             f"/api/lubrication/result-entry/sample-tests/{self.sample_test.id}/form/"
