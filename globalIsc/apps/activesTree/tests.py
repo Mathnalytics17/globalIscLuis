@@ -65,6 +65,19 @@ class SamplingPointApiTests(APITestCase):
         root.refresh_from_db()
         self.assertEqual(root.nombre, self.company.nombre)
 
+    def test_machine_name_can_repeat_in_another_company(self):
+        other_company = Empresa.objects.create(nombre='Cliente B')
+        response = self.client.post('/api/machines/', {
+            'empresa': other_company.id,
+            'nombre': self.machine.nombre,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201, response.data)
+        other_machine = Maquina.objects.get(pk=response.data['id'])
+        self.assertEqual(other_machine.nombre, self.machine.nombre)
+        self.assertNotEqual(other_machine.empresa_id, self.machine.empresa_id)
+        self.assertTrue(Carpeta.objects.filter(machine=other_machine).exists())
+
     def test_tree_always_exposes_company_name_for_legacy_root(self):
         root = Carpeta.objects.get(compania=self.company, typeFolder='root', id_parent_node='-1')
         # Simulates roots that were renamed through the legacy UI.

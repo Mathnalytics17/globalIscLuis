@@ -32,6 +32,11 @@ class Carpeta(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
+                fields=['compania'],
+                condition=Q(typeFolder='root', id_parent_node='-1'),
+                name='unique_company_root_tree_node',
+            ),
+            models.UniqueConstraint(
                 fields=['machine'],
                 condition=Q(machine__isnull=False),
                 name='unique_machine_tree_node',
