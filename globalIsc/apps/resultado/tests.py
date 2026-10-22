@@ -427,6 +427,44 @@ class ResultEntryTests(TestCase):
         self.assertEqual(repeated.status_code, 200, repeated.data)
         self.assertTrue(repeated.data["idempotent"])
 
+    def test_confirmation_repairs_a_stale_interpretation_invalidation_marker(self):
+        result = Resultado.objects.create(
+            prueba_muestra=self.sample_test,
+            resultado=json.dumps({"values": []}),
+            fecha_medicion=timezone.now(),
+            usuario_medicion=self.user,
+            estatus="rechazado",
+        )
+        self.sample_test.estatus = "rechazado"
+        self.sample_test.save(update_fields=["estatus"])
+        self.muestra.campos_adicionales = {
+            "interpretacion": {
+                "estado": "requiere_revision",
+                "invalidada_por_resultado": True,
+                "resultado_invalidado_id": result.id,
+            }
+        }
+        self.muestra.save(update_fields=["campos_adicionales"])
+
+        form = self.client.get(
+            f"/api/lubrication/result-entry/sample-tests/{self.sample_test.id}/form/"
+        )
+        field_key = form.data["fields"][0]["key"]
+        confirmed = self.client.post(
+            f"/api/lubrication/result-entry/sample-tests/{self.sample_test.id}/confirm/",
+            {"values": [{"key": field_key, "value": "12.5", "observacion": ""}]},
+            format="json",
+        )
+
+        self.assertEqual(confirmed.status_code, 200, confirmed.data)
+        self.muestra.refresh_from_db()
+        interpretation = self.muestra.campos_adicionales["interpretacion"]
+        self.assertEqual(interpretation["estado"], "pendiente_revision")
+        self.assertNotIn("resultado_invalidado_id", interpretation)
+        detail = self.client.get(f"/api/lubrication/interpretation/samples/{self.muestra.id}/")
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertEqual(detail.data["interpretacion"]["estado"], "pendiente_revision")
+
     def test_interpretation_trends_orders_by_existing_test_fields(self):
         form = self.client.get(
             f"/api/lubrication/result-entry/sample-tests/{self.sample_test.id}/form/"
