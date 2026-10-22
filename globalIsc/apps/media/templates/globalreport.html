@@ -293,6 +293,31 @@
     page-break-inside: avoid;
   }
 
+  .trends-section {
+    page-break-before: always;
+    page-break-inside: avoid;
+    margin-top: 8px;
+  }
+
+  .trend-title {
+    font-size: 11pt;
+    font-weight: bold;
+    margin: 0 0 3px 0;
+  }
+
+  .trend-subtitle {
+    font-size: 7.2pt;
+    color: #555;
+    margin-bottom: 5px;
+  }
+
+  .trend-chart {
+    width: 100%;
+    height: auto;
+    border: 0.7pt solid #999;
+    margin: 0 0 11px 0;
+  }
+
   .comments-title {
     padding: 0 0 3px 0;
     font-weight: bold;
@@ -531,6 +556,17 @@
       {% endfor %}
     </tbody>
   </table>
+
+  {% if trend_charts %}
+    <div class="trends-section">
+      <div class="trend-title">TENDENCIAS HISTÓRICAS</div>
+      <div class="trend-subtitle">Histórico disponible al emitir este informe, con alcance por {{ trend_charts.0.scope }}.</div>
+      {% for chart in trend_charts %}
+        <div class="trend-title" style="font-size: 8.5pt;">{{ chart.title }}</div>
+        <img class="trend-chart" src="{{ chart.image }}">
+      {% endfor %}
+    </div>
+  {% endif %}
 
   <table class="comments-section">
     <tr>

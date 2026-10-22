@@ -138,6 +138,30 @@ def _sync_sample_completion_from_tests(muestra):
         muestra.save(update_fields=updates)
 
 
+def _mark_interpretation_pending_review_after_correction(muestra, resultado_id):
+    """Replace the stale invalidation flag once the result has been corrected.
+
+    A correction is not immediately interpretable: it still needs a new
+    review.  Keeping ``requiere_revision`` after the rejected result has been
+    replaced made the UI claim it was invalidated while the API allowed normal
+    saves.  ``pendiente_revision`` describes the real transitional state.
+    """
+    extra = muestra.campos_adicionales if isinstance(muestra.campos_adicionales, dict) else {}
+    interpretation = extra.get("interpretacion") if isinstance(extra.get("interpretacion"), dict) else {}
+    if interpretation.get("estado") != "requiere_revision":
+        return
+    invalidated_result_id = interpretation.get("resultado_invalidado_id")
+    if invalidated_result_id and str(invalidated_result_id) != str(resultado_id):
+        return
+    interpretation.pop("invalidada_por_resultado", None)
+    interpretation.pop("motivo_invalidacion_resultado", None)
+    interpretation.pop("resultado_invalidado_id", None)
+    interpretation["estado"] = "pendiente_revision"
+    extra["interpretacion"] = interpretation
+    muestra.campos_adicionales = extra
+    muestra.save(update_fields=["campos_adicionales"])
+
+
 def _display_value_for_field(field, value):
     if value in [None, ""]:
         return value
@@ -1280,6 +1304,18 @@ def _sample_tests_for_lote(lote, muestra_id=None, include_test_structure=True):
 
 def _batch_review_payload(lote):
     tests = _sample_tests_for_lote(lote)
+    # La preparación de informes necesita mostrar el último artefacto por
+    # muestra. Consultarlo en bloque evita el N+1 y deja claro si la siguiente
+    # generación creará una versión nueva.
+    from apps.reporte.api.models.index import Reporte
+
+    report_by_sample = {}
+    for report in (
+        Reporte.objects.filter(lote=lote)
+        .only("id", "muestra_id", "consecutivo", "version", "estatus", "fecha_generacion")
+        .order_by("muestra_id", "-version", "-id")
+    ):
+        report_by_sample.setdefault(report.muestra_id, report)
     samples = []
     for muestra in lote.muestras.select_related("referencia_equipo").all().order_by("id"):
         sample_tests = [item for item in tests if item["muestra"] == muestra.id]
@@ -1289,6 +1325,7 @@ def _batch_review_payload(lote):
             or interpretation.get("comentarios_predefinidos")
             or interpretation.get("comentarios_manuales")
         )
+        current_report = report_by_sample.get(muestra.id)
         samples.append({
             "id": muestra.id,
             "fecha_toma": muestra.fecha_toma,
@@ -1309,6 +1346,13 @@ def _batch_review_payload(lote):
             and interpretation.get("estado") != "requiere_revision"
             and not any(item.get("resultado_invalidado") for item in sample_tests),
             "estado_operativo": muestra.estado_operativo,
+            "reporte_actual": {
+                "id": current_report.id,
+                "consecutivo": current_report.consecutivo,
+                "version": current_report.version,
+                "estatus": current_report.estatus,
+                "fecha_generacion": current_report.fecha_generacion,
+            } if current_report else None,
         })
     return {
         "id": lote.id,
@@ -1760,6 +1804,12 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         _sync_sample_test_limit_evaluation(prueba_muestra, result)
         if not defer_rollups:
             _sync_sample_completion_from_tests(prueba_muestra.muestra)
+
+            if was_invalidated:
+                _mark_interpretation_pending_review_after_correction(
+                    prueba_muestra.muestra,
+                    result.id,
+                )
 
             lote = prueba_muestra.muestra.lote
             if lote:
@@ -2993,6 +3043,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         st.save()
         _sync_sample_test_limit_evaluation(st, resultado)
         _sync_sample_completion_from_tests(st.muestra)
+        _mark_interpretation_pending_review_after_correction(st.muestra, resultado.id)
         if st.muestra and st.muestra.lote:
             st.muestra.lote.recalcular_estado(save=True)
 
@@ -3070,14 +3121,21 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     def complete_batch_review(self, request, lote_id=None):
         lote = get_object_or_404(self._scope_lotes(LoteMuestras.objects.prefetch_related("muestras")), pk=lote_id)
         require_batch_operation(lote, "revisar_resultados")
-        incomplete_count = PruebaMuestra.objects.filter(
+        incomplete_tests = list(PruebaMuestra.objects.filter(
             muestra__lote=lote,
             muestra__estado_operativo="activa",
             estado_asignacion="confirmada",
-        ).exclude(completada=True).count()
-        if incomplete_count:
+        ).exclude(completada=True).select_related("muestra", "prueba")[:5])
+        if incomplete_tests:
+            labels = ", ".join(
+                f"{item.muestra_id} · {item.prueba.acronimo}"
+                for item in incomplete_tests
+            )
             return Response(
-                {"detail": f"No se puede revisar el lote: faltan {incomplete_count} prueba(s) por completar."},
+                {
+                    "detail": "No se puede completar la revisión: hay ensayos sin resultado confirmado o que requieren corrección.",
+                    "ensayos_bloqueantes": labels,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         tests = (
