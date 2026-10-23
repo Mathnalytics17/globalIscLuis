@@ -300,6 +300,21 @@ class InternalUserReinviteTests(TestCase):
         self.assertEqual(invitation.empresa_id, self.global_company.id)
         self.assertEqual(invitation.role_id, self.labor_role.id)
 
+    @patch("apps.users.api.services.deliver_invitation_email", return_value=(True, ""))
+    def test_reinvite_ignores_stale_role_posted_for_same_company(self, _delivery):
+        company_role = SecurityRole.objects.get(code="empresa_consulta")
+        client = APIClient()
+        client.force_authenticate(self.admin)
+
+        response = client.post(
+            f"/api/security/users/{self.target.id}/reinvite/",
+            {"empresa": self.global_company.id, "role": company_role.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(UserInvitation.objects.get(pk=response.data["id"]).role_id, self.labor_role.id)
+
     def test_user_payload_exposes_editable_profile_relation_ids(self):
         profile = UserSerializer(self.target).data["profile"]
         self.assertEqual(profile["empresa"], self.global_company.id)

@@ -573,10 +573,15 @@ class UserSecurityViewSet(GlobalOrPermissionMixin, viewsets.GenericViewSet):
             .order_by("-updated_at", "-id")
             .first()
         )
+        is_same_company = empresa.id == target.empresa_id
         role_id = request.data.get("role")
-        role = SecurityRole.objects.filter(pk=role_id, active=True).first() if role_id else None
-        if role is None:
-            role = profile.role if profile and profile.role and profile.role.active else None
+        # A reinvitation renews an existing membership. Its role must be the
+        # role already assigned to that membership, not an arbitrary/stale
+        # value posted by the browser. A requested role is only meaningful
+        # when Global Oil is moving the user to another company.
+        role = profile.role if is_same_company and profile and profile.role and profile.role.active else None
+        if role is None and not is_same_company and role_id:
+            role = SecurityRole.objects.filter(pk=role_id, active=True).first()
         if role is None:
             role = SecurityRole.objects.filter(
                 legacy_role=target.role,
