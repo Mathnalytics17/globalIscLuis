@@ -468,16 +468,19 @@ class UserInvitationAcceptSerializer(serializers.Serializer):
     last_name = serializers.CharField(max_length=150)
     phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
     avatar = serializers.CharField(max_length=255, required=False, allow_blank=True, allow_null=True)
-    password = serializers.CharField(write_only=True)
-    password2 = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    password2 = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     def validate(self, attrs):
-        if attrs["password"] != attrs["password2"]:
+        password = attrs.get("password", "")
+        password2 = attrs.get("password2", "")
+        if bool(password) != bool(password2) or password != password2:
             raise serializers.ValidationError({"password2": "Las contrasenas no coinciden."})
-        try:
-            validate_password(attrs["password"])
-        except exceptions.ValidationError as exc:
-            raise serializers.ValidationError({"password": list(exc.messages)})
+        if password:
+            try:
+                validate_password(password)
+            except exceptions.ValidationError as exc:
+                raise serializers.ValidationError({"password": list(exc.messages)})
         return attrs
 
 

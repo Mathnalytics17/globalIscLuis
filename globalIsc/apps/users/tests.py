@@ -227,6 +227,31 @@ class UserReinvitationLifecycleTests(TestCase):
         self.assertEqual(profile.status, UserCompanyProfile.Status.ACTIVE)
 
     @patch("apps.users.api.services.deliver_invitation_email", return_value=(True, ""))
+    def test_reinvitation_keeps_an_existing_password(self, _delivery):
+        original_password = "Old-password-123!"
+        invitation = create_invitation(self.user.email, self.company_a, role=self.role)
+
+        self.assertFalse(invitation.metadata["requires_password"])
+        accepted = accept_invitation(
+            invitation.token,
+            "Ana",
+            "Prueba",
+            "",
+        )
+
+        accepted.refresh_from_db()
+        self.assertTrue(accepted.check_password(original_password))
+        self.assertTrue(accepted.is_active)
+
+    @patch("apps.users.api.services.deliver_invitation_email", return_value=(True, ""))
+    def test_new_invitation_requires_a_password(self, _delivery):
+        invitation = create_invitation("nueva@example.com", self.company_a, role=self.role)
+
+        self.assertTrue(invitation.metadata["requires_password"])
+        with self.assertRaisesMessage(ValueError, "requiere que defina una contraseña"):
+            accept_invitation(invitation.token, "Nueva", "Persona", "")
+
+    @patch("apps.users.api.services.deliver_invitation_email", return_value=(True, ""))
     def test_company_transfer_only_changes_membership_after_acceptance(self, _delivery):
         with self.assertRaises(ValueError):
             create_invitation(self.user.email, self.company_b, role=self.role)
