@@ -305,6 +305,24 @@ class InternalUserReinviteTests(TestCase):
         self.assertEqual(profile["empresa"], self.global_company.id)
         self.assertEqual(profile["role"], self.labor_role.id)
 
+    def test_user_payload_prefers_current_company_over_historical_profile(self):
+        customer = Empresa.objects.create(nombre="Empresa histórica", nit="HISTORICAL-TEST")
+        customer_role = SecurityRole.objects.get(code="empresa_consulta")
+        current_profile = self.target.company_profiles.get(empresa=self.global_company)
+        current_profile.status = UserCompanyProfile.Status.REMOVED
+        current_profile.save(update_fields=["status", "updated_at"])
+        UserCompanyProfile.objects.create(
+            user=self.target,
+            empresa=customer,
+            role=customer_role,
+            status=UserCompanyProfile.Status.ACTIVE,
+        )
+
+        profile = UserSerializer(self.target).data["profile"]
+
+        self.assertEqual(profile["empresa"], self.global_company.id)
+        self.assertEqual(profile["role"], self.labor_role.id)
+
 
 class DataScopeTests(TestCase):
     def setUp(self):

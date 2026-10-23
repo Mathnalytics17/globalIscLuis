@@ -126,18 +126,24 @@ class UserSerializer(serializers.ModelSerializer):
         )
 
     def get_profile(self, obj):
-        profile = (
-            obj.company_profiles
-            .select_related("empresa", "role")
-            .filter(status__in=[
-                UserCompanyProfile.Status.PENDING,
-                UserCompanyProfile.Status.ACTIVE,
-                UserCompanyProfile.Status.READ_ONLY,
-                UserCompanyProfile.Status.BLOCKED,
-            ])
-            .order_by("-is_company_admin", "id")
-            .first()
-        )
+        profiles = obj.company_profiles.select_related("empresa", "role")
+        # The editable role must belong to the user's current company.  A user
+        # can retain historical profiles (including a removed profile after a
+        # transfer), and selecting an arbitrary active one made the editor and
+        # reinvitation send the company/role of an old membership.
+        profile = profiles.filter(empresa_id=obj.empresa_id).order_by("-updated_at", "-id").first()
+        if profile is None:
+            profile = (
+                profiles
+                .filter(status__in=[
+                    UserCompanyProfile.Status.PENDING,
+                    UserCompanyProfile.Status.ACTIVE,
+                    UserCompanyProfile.Status.READ_ONLY,
+                    UserCompanyProfile.Status.BLOCKED,
+                ])
+                .order_by("-is_company_admin", "-updated_at", "-id")
+                .first()
+            )
         if not profile:
             return None
         return {
