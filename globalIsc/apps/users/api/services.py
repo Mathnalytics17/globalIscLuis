@@ -535,6 +535,10 @@ def create_invitation(
         )
 
     invitation_metadata = dict(metadata or {})
+    # A reinvitation for an account that already has a usable password must
+    # never force the person to create another one.  The invitation only
+    # renews/changes their access; their existing credentials stay valid.
+    invitation_metadata["requires_password"] = created or not user.has_usable_password() or not bool(user.password)
     if previous_company_id and previous_company_id != empresa.id:
         invitation_metadata["company_transfer"] = {
             "from_company_id": previous_company_id,
@@ -612,7 +616,7 @@ def send_invitation_email(invitation):
 
 
 @transaction.atomic
-def accept_invitation(token, first_name, last_name, password, phone="", avatar=None):
+def accept_invitation(token, first_name, last_name, password="", phone="", avatar=None):
     invitation = (
         UserInvitation.objects
         .select_for_update(of=("self",))
@@ -653,7 +657,15 @@ def accept_invitation(token, first_name, last_name, password, phone="", avatar=N
     user.email_verified = True
     user.is_active = True
     user.access_status = User.AccessStatus.ACTIVE
-    user.set_password(password)
+    requires_password = (invitation.metadata or {}).get("requires_password")
+    if requires_password is None:
+        # Invitations created before this flag existed are still safe: an
+        # empty password is not a login credential and requires activation.
+        requires_password = not user.has_usable_password() or not bool(user.password)
+    if requires_password:
+        if not password:
+            raise ValueError("Esta invitación requiere que defina una contraseña.")
+        user.set_password(password)
     user.save()
 
     ensure_user_profile(

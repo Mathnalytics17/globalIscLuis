@@ -373,7 +373,7 @@ class UserInvitationViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
                 last_name=serializer.validated_data["last_name"],
                 phone=serializer.validated_data.get("phone", ""),
                 avatar=serializer.validated_data.get("avatar"),
-                password=serializer.validated_data["password"],
+                password=serializer.validated_data.get("password", ""),
             )
         except (UserInvitation.DoesNotExist, ValueError) as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -404,6 +404,10 @@ class UserInvitationViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
             "expires_at": invitation.expires_at,
             "status": invitation.status,
             "metadata": invitation.metadata or {},
+            "requires_password": (invitation.metadata or {}).get(
+                "requires_password",
+                not (invitation.user and invitation.user.has_usable_password() and invitation.user.password),
+            ),
         })
 
 
