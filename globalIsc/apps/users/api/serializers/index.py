@@ -142,8 +142,12 @@ class UserSerializer(serializers.ModelSerializer):
             return None
         return {
             "id": profile.id,
+            # Keep both the explicit *_id values and the conventional relation
+            # keys.  Browser clients use the latter when editing a profile.
+            "empresa": profile.empresa_id,
             "empresa_id": profile.empresa_id,
             "empresa_nombre": getattr(profile.empresa, "nombre", None),
+            "role": profile.role_id,
             "role_id": profile.role_id,
             "role_name": getattr(profile.role, "name", None),
             "role_code": getattr(profile.role, "code", None),
