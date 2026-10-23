@@ -10,7 +10,8 @@ from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from apps.misc.api.models.companies.index import Empresa
 from apps.users.api.models.index import User
-from apps.users.api.models.index import SecurityPermission, SecurityRole, SecurityRolePermission, UserCompanyProfile, UserDataScopeCompany
+from apps.users.api.models.index import SecurityPermission, SecurityRole, SecurityRolePermission, UserCompanyProfile, UserDataScopeCompany, UserInvitation
+from apps.users.api.serializers.index import UserSerializer
 from apps.users.api.data_scope import accessible_company_ids, scope_queryset
 from apps.users.api.services import accept_invitation, create_invitation, seed_default_permissions
 from apps.users.api.views.user.index import CurrentUserView
@@ -255,6 +256,87 @@ class UserReinvitationLifecycleTests(TestCase):
             UserCompanyProfile.objects.get(user=accepted, empresa=self.company_b).status,
             UserCompanyProfile.Status.ACTIVE,
         )
+
+
+class InternalUserReinviteTests(TestCase):
+    def setUp(self):
+        seed_default_permissions()
+        self.global_company = Empresa.objects.create(
+            nombre="Global Oil Reinvite",
+            nit="GO-REINVITE-TEST",
+            is_internal=True,
+        )
+        self.labor_role = SecurityRole.objects.get(code="laboratorista")
+        self.admin = User.objects.create_user(
+            email="admin-reinvite@example.com",
+            password="Test-password-123!",
+            role=User.Role.GLOBAL,
+            is_active=True,
+        )
+        self.target = User.objects.create_user(
+            email="laboratorista-reinvite@example.com",
+            password="Test-password-123!",
+            empresa=self.global_company,
+            role=User.Role.LABORATORISTA,
+            is_active=False,
+            access_status=User.AccessStatus.PENDING_INVITATION,
+        )
+        UserCompanyProfile.objects.create(
+            user=self.target,
+            empresa=self.global_company,
+            role=self.labor_role,
+            status=UserCompanyProfile.Status.PENDING,
+        )
+
+    @patch("apps.users.api.services.deliver_invitation_email", return_value=(True, ""))
+    def test_reinvite_keeps_internal_role_when_client_omits_it(self, _delivery):
+        client = APIClient()
+        client.force_authenticate(self.admin)
+
+        response = client.post(f"/api/security/users/{self.target.id}/reinvite/", {}, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        invitation = UserInvitation.objects.get(pk=response.data["id"])
+        self.assertEqual(invitation.empresa_id, self.global_company.id)
+        self.assertEqual(invitation.role_id, self.labor_role.id)
+
+    @patch("apps.users.api.services.deliver_invitation_email", return_value=(True, ""))
+    def test_reinvite_ignores_stale_role_posted_for_same_company(self, _delivery):
+        company_role = SecurityRole.objects.get(code="empresa_consulta")
+        client = APIClient()
+        client.force_authenticate(self.admin)
+
+        response = client.post(
+            f"/api/security/users/{self.target.id}/reinvite/",
+            {"empresa": self.global_company.id, "role": company_role.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(UserInvitation.objects.get(pk=response.data["id"]).role_id, self.labor_role.id)
+
+    def test_user_payload_exposes_editable_profile_relation_ids(self):
+        profile = UserSerializer(self.target).data["profile"]
+        self.assertEqual(profile["empresa"], self.global_company.id)
+        self.assertEqual(profile["role"], self.labor_role.id)
+
+    def test_user_payload_prefers_current_company_over_historical_profile(self):
+        customer = Empresa.objects.create(nombre="Empresa histórica", nit="HISTORICAL-TEST")
+        customer_role = SecurityRole.objects.get(code="empresa_consulta")
+        current_profile = self.target.company_profiles.get(empresa=self.global_company)
+        current_profile.status = UserCompanyProfile.Status.REMOVED
+        current_profile.save(update_fields=["status", "updated_at"])
+        UserCompanyProfile.objects.create(
+            user=self.target,
+            empresa=customer,
+            role=customer_role,
+            status=UserCompanyProfile.Status.ACTIVE,
+        )
+
+        profile = UserSerializer(self.target).data["profile"]
+
+        self.assertEqual(profile["empresa"], self.global_company.id)
+        self.assertEqual(profile["role"], self.labor_role.id)
 
 
 class DataScopeTests(TestCase):

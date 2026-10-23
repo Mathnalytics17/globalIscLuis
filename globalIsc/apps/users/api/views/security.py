@@ -556,8 +556,37 @@ class UserSecurityViewSet(GlobalOrPermissionMixin, viewsets.GenericViewSet):
                 empresa = Empresa.objects.get(pk=requested_company_id)
             except Empresa.DoesNotExist:
                 return Response({"empresa": ["La empresa no existe."]}, status=status.HTTP_400_BAD_REQUEST)
+        if empresa is None:
+            return Response(
+                {"empresa": ["El usuario no tiene una empresa asignada para reenviar la invitación."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Reinviting must preserve the existing assignment when the browser
+        # does not explicitly send a role.  Previously that omission made an
+        # internal Global Oil account fall back to the default COMPANY role,
+        # which is invalid for the internal company.
+        profile = (
+            UserCompanyProfile.objects
+            .select_related("role")
+            .filter(user=target, empresa=empresa)
+            .order_by("-updated_at", "-id")
+            .first()
+        )
+        is_same_company = empresa.id == target.empresa_id
         role_id = request.data.get("role")
-        role = SecurityRole.objects.filter(pk=role_id, active=True).first() if role_id else None
+        # A reinvitation renews an existing membership. Its role must be the
+        # role already assigned to that membership, not an arbitrary/stale
+        # value posted by the browser. A requested role is only meaningful
+        # when Global Oil is moving the user to another company.
+        role = profile.role if is_same_company and profile and profile.role and profile.role.active else None
+        if role is None and not is_same_company and role_id:
+            role = SecurityRole.objects.filter(pk=role_id, active=True).first()
+        if role is None:
+            role = SecurityRole.objects.filter(
+                legacy_role=target.role,
+                active=True,
+            ).order_by("id").first()
         if role and not is_role_assignable_by(request.user, role):
             return Response({"detail": "No puede asignar ese rol."}, status=status.HTTP_403_FORBIDDEN)
         try:
@@ -565,7 +594,7 @@ class UserSecurityViewSet(GlobalOrPermissionMixin, viewsets.GenericViewSet):
                 email=target.email,
                 empresa=empresa,
                 role=role,
-                is_company_admin=bool(request.data.get("is_company_admin", False)),
+                is_company_admin=bool(request.data.get("is_company_admin", getattr(profile, "is_company_admin", False))),
                 invited_by=request.user,
                 metadata={"first_name": target.first_name, "last_name": target.last_name},
                 allow_company_transfer=self._is_global(),

@@ -126,24 +126,34 @@ class UserSerializer(serializers.ModelSerializer):
         )
 
     def get_profile(self, obj):
-        profile = (
-            obj.company_profiles
-            .select_related("empresa", "role")
-            .filter(status__in=[
-                UserCompanyProfile.Status.PENDING,
-                UserCompanyProfile.Status.ACTIVE,
-                UserCompanyProfile.Status.READ_ONLY,
-                UserCompanyProfile.Status.BLOCKED,
-            ])
-            .order_by("-is_company_admin", "id")
-            .first()
-        )
+        profiles = obj.company_profiles.select_related("empresa", "role")
+        # The editable role must belong to the user's current company.  A user
+        # can retain historical profiles (including a removed profile after a
+        # transfer), and selecting an arbitrary active one made the editor and
+        # reinvitation send the company/role of an old membership.
+        profile = profiles.filter(empresa_id=obj.empresa_id).order_by("-updated_at", "-id").first()
+        if profile is None:
+            profile = (
+                profiles
+                .filter(status__in=[
+                    UserCompanyProfile.Status.PENDING,
+                    UserCompanyProfile.Status.ACTIVE,
+                    UserCompanyProfile.Status.READ_ONLY,
+                    UserCompanyProfile.Status.BLOCKED,
+                ])
+                .order_by("-is_company_admin", "-updated_at", "-id")
+                .first()
+            )
         if not profile:
             return None
         return {
             "id": profile.id,
+            # Keep both the explicit *_id values and the conventional relation
+            # keys.  Browser clients use the latter when editing a profile.
+            "empresa": profile.empresa_id,
             "empresa_id": profile.empresa_id,
             "empresa_nombre": getattr(profile.empresa, "nombre", None),
+            "role": profile.role_id,
             "role_id": profile.role_id,
             "role_name": getattr(profile.role, "name", None),
             "role_code": getattr(profile.role, "code", None),
