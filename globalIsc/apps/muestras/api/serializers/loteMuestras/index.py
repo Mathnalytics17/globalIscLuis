@@ -109,7 +109,8 @@ class LoteMuestraWorkspaceSerializer(serializers.ModelSerializer):
         assignments = obj.asignaciones_punto_muestreo.all()
         current = next((item for item in assignments if item.activa), None)
         if not current:
-            return None
+            nombre = (obj.campos_adicionales or {}).get('punto_muestreo_manual')
+            return {"id": None, "nombre": nombre, "manual": True} if nombre else None
         return {"id": current.punto_muestreo_id, "nombre": current.punto_muestreo.nombre}
 
     def get_estado_flujo(self, obj):
@@ -128,6 +129,8 @@ class LoteMuestraWorkspaceSerializer(serializers.ModelSerializer):
             return {"code": "resultados_completos", "label": "Resultados completos"}
         if obj.is_ingresado:
             return {"code": "en_laboratorio", "label": "En laboratorio"}
+        if lote and lote.estado == "borrador":
+            return {"code": "borrador", "label": "Borrador"}
         return {"code": "registrada", "label": "Registrada"}
 
     def get_plazo_entrega(self, obj):
@@ -578,6 +581,10 @@ class LoteMuestrasCreateSerializer(serializers.ModelSerializer):
             atributos_data = muestra_data.pop("atributos_tecnicos", None)
             punto_muestreo = muestra_data.pop("punto_muestreo", None)
             punto_muestreo_manual = muestra_data.pop("punto_muestreo_manual", None)
+            if punto_muestreo_manual:
+                campos = dict(muestra_data.get("campos_adicionales") or {})
+                campos["punto_muestreo_manual"] = punto_muestreo_manual
+                muestra_data["campos_adicionales"] = campos
             muestra_data.pop("fecha_envio", None)
             muestra_data.pop("contacto_cliente", None)
             muestra_data.pop("usuario_registro", None)
@@ -639,6 +646,10 @@ class AddMuestrasToLoteSerializer(serializers.Serializer):
             atributos_data = muestra_data.pop("atributos_tecnicos", None)
             punto_muestreo = muestra_data.pop("punto_muestreo", None)
             punto_muestreo_manual = muestra_data.pop("punto_muestreo_manual", None)
+            if punto_muestreo_manual:
+                campos = dict(muestra_data.get("campos_adicionales") or {})
+                campos["punto_muestreo_manual"] = punto_muestreo_manual
+                muestra_data["campos_adicionales"] = campos
             muestra_data.pop("fecha_envio", None)
             muestra_data.pop("contacto_cliente", None)
             muestra_data.pop("usuario_registro", None)

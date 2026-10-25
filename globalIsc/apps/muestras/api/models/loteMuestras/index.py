@@ -173,7 +173,7 @@ class LoteMuestras(models.Model):
         muestras = self.muestras.filter(estado_operativo="activa")
         total = muestras.count()
 
-        if self.estado == "cancelado":
+        if self.estado in ("cancelado", "borrador"):
             return self.estado
 
         if total == 0:

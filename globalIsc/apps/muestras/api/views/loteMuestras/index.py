@@ -67,6 +67,7 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "samples": "lotes.ver",
         "cancel": "lotes.eliminar",
         "reopen": "lotes.recalcular_estado",
+        "register_draft": "lotes.editar",
     }
 
     def get_required_permission(self):
@@ -75,6 +76,18 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         if getattr(self, "action", None) == "samples" and self.request.method != "GET":
             return "muestras.crear"
         return super().get_required_permission()
+
+    @action(detail=True, methods=["post"], url_path="register")
+    def register_draft(self, request, pk=None):
+        lote = self.get_object()
+        if lote.estado != "borrador":
+            return Response({"detail": "Solo se puede registrar un lote en borrador."}, status=status.HTTP_400_BAD_REQUEST)
+        if not lote.muestras.filter(estado_operativo="activa").exists():
+            return Response({"detail": "El borrador debe tener al menos una muestra activa."}, status=status.HTTP_400_BAD_REQUEST)
+        lote.estado = "registrado"
+        lote.save(update_fields=["estado", "fecha_actualizacion"])
+        record_operational_event(actor=request.user, action="lote.registrado", entity_type="lote", entity_id=lote.id, entity_label=lote.id, lote=lote, detail="Borrador registrado.", before={"estado": "borrador"}, after={"estado": "registrado"})
+        return Response({"id": lote.id, "estado": lote.estado})
 
     def get_queryset(self):
         queryset = (

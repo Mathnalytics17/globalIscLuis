@@ -159,6 +159,7 @@ class IngresoLabLoteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             .filter(total_muestras_db__gt=0)
             .exclude(ingreso_lab_lote__isnull=False)
             .exclude(estado__in=[
+                "borrador",
                 "cancelado",
                 "reportado",
                 "en_laboratorio",
