@@ -184,7 +184,7 @@ class CreateIngresoLabLoteSerializer(serializers.ModelSerializer):
         if not lote.muestras.exists():
             raise serializers.ValidationError("Este lote no tiene muestras asociadas.")
 
-        if lote.estado in ["cancelado", "reportado", "en_laboratorio", "en_analisis", "parcial", "resultados_completos", "revisado"]:
+        if lote.estado in ["borrador", "cancelado", "reportado", "en_laboratorio", "en_analisis", "parcial", "resultados_completos", "revisado"]:
             raise serializers.ValidationError("Este lote no puede ingresarse al laboratorio por su estado actual.")
 
         return lote

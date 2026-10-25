@@ -33,6 +33,7 @@ urlpatterns = [
     path("lubrication/sample-batches/<str:pk>/samples/", LoteMuestrasViewSet.as_view({"get": "samples", "post": "samples"}), name="sample-batches-samples"),
     path("lubrication/sample-batches/<str:pk>/cancel/", LoteMuestrasViewSet.as_view({"post": "cancel"}), name="sample-batches-cancel"),
     path("lubrication/sample-batches/<str:pk>/reopen/", LoteMuestrasViewSet.as_view({"post": "reopen"}), name="sample-batches-reopen"),
+    path("lubrication/sample-batches/<str:pk>/register/", LoteMuestrasViewSet.as_view({"post": "register_draft"}), name="sample-batches-register"),
     path("lubrication/sample-batches/<str:pk>/timeline/", LoteMuestrasViewSet.as_view({"get": "timeline"}), name="sample-batches-timeline"),
     path("lubrication/sample-batches/<str:pk>/", LoteMuestrasViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="sample-batches-detail"),
 ]

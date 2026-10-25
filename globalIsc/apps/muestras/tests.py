@@ -824,6 +824,43 @@ class LoteMuestrasCreateSerializerTests(TestCase):
             empresa=self.empresa,
         )
 
+    def test_occasional_draft_keeps_manual_point_and_stays_draft(self):
+        payload = {
+            "tipo_cliente": "ocasional", "cliente_ocasional_nombre": "Taller ocasional",
+            "contacto_nombre": "Contacto", "fecha_envio": "2026-10-18",
+            "estado": "borrador", "usuario_registro": self.user.id,
+            "muestras": [{"fecha_toma": "2026-10-18T10:00:00-05:00", "tipo_muestra": "aceite",
+                          "condicion": "usada", "equipo_placa": "TAXI 0223", "punto_muestreo_manual": "Transmisión"}],
+        }
+        serializer = LoteMuestrasCreateSerializer(data=payload)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        lote = serializer.save()
+        muestra = lote.muestras.get()
+        lote.refresh_from_db()
+        self.assertEqual(lote.estado, "borrador")
+        self.assertEqual(muestra.equipo_placa, "TAXI 0223")
+        self.assertEqual(muestra.campos_adicionales["punto_muestreo_manual"], "Transmisión")
+        row = LoteMuestraWorkspaceSerializer(muestra).data
+        self.assertEqual(row["punto_muestreo"]["nombre"], "Transmisión")
+        self.assertEqual(row["estado_flujo"]["code"], "borrador")
+        lote.recalcular_estado()
+        self.assertEqual(lote.estado, "borrador")
+
+        from apps.muestras.api.serializers.ingresoLabLote.index import CreateIngresoLabLoteSerializer
+        lab_serializer = CreateIngresoLabLoteSerializer(data={"lote": lote.id, "fecha_recepcion": timezone.now().isoformat()})
+        self.assertFalse(lab_serializer.is_valid())
+        self.assertIn("lote", lab_serializer.errors)
+
+        self.user.is_superuser = True
+        self.user.is_active = True
+        self.user.save(update_fields=["is_superuser", "is_active"])
+        client = APIClient()
+        client.force_authenticate(self.user)
+        response = client.post(f"/api/lubrication/sample-batches/{lote.id}/register/", {}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        lote.refresh_from_db()
+        self.assertEqual(lote.estado, "registrado")
+
     def test_nested_sample_accepts_technical_attributes_without_sample_id(self):
         catalog_1, item_1 = self._catalog_item("Grado de viscosidad", "grado_viscosidad")
         catalog_2, item_2 = self._catalog_item("Nivel de desempeno", "nivel_desempeno")

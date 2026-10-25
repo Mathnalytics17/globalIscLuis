@@ -250,7 +250,8 @@ class MuestraListSerializer(serializers.ModelSerializer):
             return None
         current = next((item for item in assignments.all() if item.activa), None)
         if not current:
-            return None
+            nombre = (obj.campos_adicionales or {}).get('punto_muestreo_manual')
+            return {'id': None, 'nombre': nombre, 'manual': True} if nombre else None
         return {
             'id': current.punto_muestreo_id,
             'nombre': current.punto_muestreo.nombre,
