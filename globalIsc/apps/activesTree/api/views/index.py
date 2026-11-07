@@ -17,6 +17,12 @@ from apps.users.api.data_scope import can_access_company, scope_queryset
 from apps.activesTree.api.models.index import Carpeta, PuntoMuestreo, AsignacionPuntoMuestreo, Lubricante
 from apps.activesTree.api.models.machines.index import Maquina
 from apps.activesTree.services import ensure_machine_tree_node
+from apps.activesTree.machine_list_cache import (
+    get_machine_list_response,
+    set_machine_list_response,
+    get_related_read_response,
+    set_related_read_response,
+)
 from apps.muestras.api.models.muestras.index import Muestra
 from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
 from apps.resultado.api.models.index import Resultado
@@ -128,7 +134,11 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
     ordering = ['nombre']
 
     def get_queryset(self):
-        queryset = self.queryset
+        queryset = self.queryset.annotate(
+            puntos_muestreo_activos_count=Count(
+                'puntos_muestreo', filter=Q(puntos_muestreo__activo=True), distinct=True,
+            ),
+        )
         user = self.request.user
         queryset = scope_queryset(queryset, user, "empresa_id")
         if self.action != 'reactivate' and self.request.query_params.get('include_inactive') not in ['1', 'true', 'True']:
@@ -146,6 +156,78 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 'muestra_set__resultados__prueba',
             )
         return queryset
+
+    def _set_machine_locations(self, machines):
+        """Build every visible machine location in two bulk queries.
+
+        The former serializer implementation counted sampling points and read
+        the whole folder tree per machine. That made a page of N machines issue
+        roughly 2N extra SQL queries. This map keeps the response identical
+        while reading all required tree nodes once.
+        """
+        machine_ids = [machine.id for machine in machines]
+        if not machine_ids:
+            self._machine_locations = {}
+            return
+
+        company_ids = {machine.empresa_id for machine in machines}
+        folders = Carpeta.objects.filter(compania_id__in=company_ids).only(
+            'id', 'compania_id', 'machine_id', 'nombre', 'id_parent_node',
+        )
+        folders_by_company = {}
+        machine_nodes = {}
+        for folder in folders:
+            folders_by_company.setdefault(folder.compania_id, {})[str(folder.id)] = folder
+            if folder.machine_id in machine_ids:
+                machine_nodes[folder.machine_id] = folder
+
+        locations = {}
+        for machine in machines:
+            folder = machine_nodes.get(machine.id)
+            if not folder:
+                locations[machine.id] = ''
+                continue
+            tree = folders_by_company.get(machine.empresa_id, {})
+            parts, visited = [], set()
+            parent_id = str(folder.id_parent_node)
+            while parent_id and parent_id != '-1' and parent_id not in visited:
+                visited.add(parent_id)
+                parent = tree.get(parent_id)
+                if not parent:
+                    break
+                parts.append(parent.nombre)
+                parent_id = str(parent.id_parent_node)
+            locations[machine.id] = ' / '.join(reversed(parts))
+        self._machine_locations = locations
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if hasattr(self, '_machine_locations'):
+            context['machine_locations'] = self._machine_locations
+        return context
+
+    def list(self, request, *args, **kwargs):
+        # Historical responses include large nested result payloads and must
+        # always be built live; normal list pages are safe to cache per user.
+        includes_samples = request.query_params.get('include_muestras') in ['1', 'true', 'True']
+        if not includes_samples:
+            cached_payload, cache_version = get_machine_list_response(request)
+            if cached_payload is not None:
+                return Response(cached_payload)
+
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        rows = page if page is not None else queryset
+        self._set_machine_locations(rows)
+        serializer = self.get_serializer(rows, many=True)
+
+        if page is None:
+            return Response(serializer.data)
+
+        response = self.get_paginated_response(serializer.data)
+        if not includes_samples:
+            set_machine_list_response(request, response.data, cache_version)
+        return response
 
     def get_serializer_class(self):
         if self.request.query_params.get('include_muestras') in ['1', 'true', 'True']:
@@ -303,6 +385,9 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='history')
     def history(self, request, pk=None):
+        cached_payload, cache_token = get_related_read_response(request, "history")
+        if cached_payload is not None:
+            return Response(cached_payload)
         machine = self.get_object()
         point_id = request.query_params.get("point")
         test_id = request.query_params.get("test")
@@ -325,12 +410,19 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         if test_id:
             assignments = assignments.filter(prueba_id=test_id)
         assignments = assignments.order_by("muestra__fecha_toma", "muestra_id", "id")
-        page = self.paginate_queryset(assignments)
-        selected = page if page is not None else assignments
-        rows = [row for assignment in selected for row in self._history_rows(assignment)]
+        # A page of assignments is not a meaningful page of a time series: a
+        # machine with many sampling points can have its first 20 results on
+        # the same date, which makes the history chart look like a single-day
+        # snapshot.  Return the complete, explicitly filtered history; the
+        # client already groups the rows into individual point/result series.
+        rows = [row for assignment in assignments for row in self._history_rows(assignment)]
+        page = self.paginate_queryset(rows)
         if page is not None:
-            return self.get_paginated_response(rows)
-        return Response(rows)
+            response = self.get_paginated_response(page)
+        else:
+            response = Response(rows)
+        set_related_read_response(response.data, cache_token, timeout=60)
+        return response
 
 
 class PuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
@@ -360,7 +452,7 @@ class PuntoMuestreoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(maquina_id=machine)
         if self.action != 'reactivate' and self.request.query_params.get('include_inactive') not in ('1', 'true', 'True'):
             queryset = queryset.filter(activo=True)
-        return queryset
+        return queryset.order_by('maquina__nombre', 'nombre', 'id')
 
     def perform_create(self, serializer):
         point = serializer.save(creado_por=self.request.user)

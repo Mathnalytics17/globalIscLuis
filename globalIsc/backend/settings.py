@@ -82,11 +82,11 @@ INSTALLED_APPS = [
     "django_filters",
     "apps.activesTree.apps.ActivestreeConfig",
     "apps.users",
-    "apps.misc",
+    "apps.misc.apps.MiscConfig",
     "apps.muestras",
-    "apps.reporte",
+    "apps.reporte.apps.ReporteConfig",
     "apps.resultado",
-    "apps.dashboard",
+    "apps.dashboard.apps.DashboardConfig",
 ]
 
 MIDDLEWARE = [

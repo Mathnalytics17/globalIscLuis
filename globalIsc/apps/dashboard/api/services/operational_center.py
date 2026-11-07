@@ -361,7 +361,14 @@ def build_operational_center(user, params=None):
     for item in ready[:10]:
         alerts.append(_alert("ready", "media", f"{item['id']} listo para informe", f"{item['client']} - {item['status_label']}", item))
 
-    for test in undesired_tests.select_related("muestra", "muestra__lote", "prueba").order_by("-fecha_medicion")[:10]:
+    alert_tests_queryset = (
+        "muestra__lote__muestras",
+        "muestra__lote__cliente_empresa",
+        "muestra__lote__tipo_gestion",
+    )
+    for test in undesired_tests.select_related("muestra", "muestra__lote", "prueba").prefetch_related(
+        *alert_tests_queryset,
+    ).order_by("-fecha_medicion")[:10]:
         batch = test.muestra.lote
         card = serialize_batch_card(batch, today=today)
         alerts.append(_alert(
@@ -372,7 +379,9 @@ def build_operational_center(user, params=None):
             card,
         ))
 
-    for test in config_issue_tests.select_related("muestra", "muestra__lote", "prueba").order_by("-fecha_medicion")[:8]:
+    for test in config_issue_tests.select_related("muestra", "muestra__lote", "prueba").prefetch_related(
+        *alert_tests_queryset,
+    ).order_by("-fecha_medicion")[:8]:
         batch = test.muestra.lote
         card = serialize_batch_card(batch, today=today)
         alerts.append(_alert(
@@ -395,13 +404,21 @@ def build_operational_center(user, params=None):
     delayed_samples = [item for item in (_serialize_operational_delay(batch, today) for batch in active_batches) if item]
     delayed_samples.sort(key=lambda item: (item["days_in_stage"] is None, -(item["days_in_stage"] or 0), item["id"]))
     received_days = [_days_since(batch.fecha_recepcion, today) for batch in active_batches if batch.fecha_recepcion]
+    # Filter options must not materialize every lot (and their prefetched
+    # samples) a second time. SQL can return the two small distinct lists.
     client_options = sorted({
-        (str(batch.cliente_empresa_id), _client_name(batch))
-        for batch in scoped_batches_for_user(user).exclude(cliente_empresa__isnull=True)
+        (str(company_id), company_name or "Sin cliente")
+        for company_id, company_name in scoped_batches_for_user(user)
+        .exclude(cliente_empresa__isnull=True)
+        .values_list("cliente_empresa_id", "cliente_empresa__nombre")
+        .distinct()
     }, key=lambda item: item[1].lower())
     management_options = sorted({
-        (str(batch.tipo_gestion_id), getattr(batch.tipo_gestion, "nombre", None) or "Sin gestión")
-        for batch in scoped_batches_for_user(user).exclude(tipo_gestion__isnull=True)
+        (str(management_id), management_name or "Sin gestión")
+        for management_id, management_name in scoped_batches_for_user(user)
+        .exclude(tipo_gestion__isnull=True)
+        .values_list("tipo_gestion_id", "tipo_gestion__nombre")
+        .distinct()
     }, key=lambda item: item[1].lower())
 
     return {

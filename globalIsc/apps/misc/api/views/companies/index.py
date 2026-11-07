@@ -31,7 +31,7 @@ class EmpresaViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         user = self.request.user
         if user.is_superuser or user.role == User.Role.GLOBAL:
-            # Global Oil is an internal operational tenant.  It must be opted
+            # DATAIA Oil Lab is an internal operational tenant.  It must be opted
             # into explicitly by security screens, otherwise generic company
             # pickers would incorrectly offer it as a client.
             if (
@@ -125,7 +125,7 @@ class EmpresaViewSet(viewsets.ModelViewSet):
         empresa = self.get_object()
         if empresa.is_internal:
             return Response(
-                {"detail": "Global Oil es la empresa interna del sistema y no puede desactivarse ni eliminarse."},
+                {"detail": "DATAIA Oil Lab es la empresa interna del sistema y no puede desactivarse ni eliminarse."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         empresa.is_active = False

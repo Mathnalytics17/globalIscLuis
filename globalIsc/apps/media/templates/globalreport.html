@@ -150,35 +150,35 @@
   }
 
   .analysis-main {
-    width: 9%;
+    width: 12%;
     text-align: left;
   }
 
   .analysis-sub {
-    width: 10%;
+    width: 12%;
     text-align: left;
   }
 
   .method-col {
-    width: 8%;
+    width: 9%;
   }
 
   .result-col {
-    width: 12%;
+    width: 14%;
   }
 
   .unit-col {
-    width: 5%;
+    width: 7%;
   }
 
   .bands-col {
-    width: 29%;
+    width: 30%;
     font-size: 6.8pt;
     line-height: 1.08;
   }
 
   .comment-col {
-    width: 12%;
+    width: 16%;
     font-weight: bold;
     font-size: 7pt;
     line-height: 0.98;
@@ -409,7 +409,7 @@
   <table class="header">
     <tr>
       <td class="header-logo-cell">
-        <img class="logo-global" src="./logo-globaloil.jpg">
+        <img class="logo-global" src="./logo-dataia.png">
         <div class="company-small">
           <strong>NIT: 830135980-4</strong><br>
           Parque Industrial Ciem Oikos de Occidente<br>
@@ -490,14 +490,9 @@
         {% if grupo.list|length > 1 %}
           {% for row in grupo.list %}
             <tr>
-              {# No usamos rowspan: ReportLab/xhtml2pdf no puede dividir una tabla entre páginas si un rowspan grande cruza el punto de corte. #}
-              <td class="analysis-main">
-                {% if forloop.first %}{{ grupo.grouper }}{% else %}&nbsp;{% endif %}
-              </td>
+              {% if forloop.first %}<td class="analysis-main" rowspan="{{ grupo.list|length }}">{{ grupo.grouper }}</td>{% endif %}
               <td class="analysis-sub">{{ row.subanalisis|default:"-" }}</td>
-              <td class="center method-col">
-                {% if forloop.first %}{{ grupo.list.0.metodo|default:"-" }}{% else %}&nbsp;{% endif %}
-              </td>
+              {% if forloop.first %}<td class="center method-col" rowspan="{{ grupo.list|length }}">{{ grupo.list.0.metodo|default:"-" }}</td>{% endif %}
               <td class="result-col">
                 {% if row.display_tokens %}
                   <div class="result-layout">

@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.muestras.services.operational_audit import record_operational_event
+from apps.misc.catalog_cache import CatalogResponseCacheMixin
 
 from apps.misc.api.models.technicalCatalogs.index import (
     CategoriaUnidad,
@@ -21,7 +22,7 @@ from apps.misc.api.serializers.technicalCatalogs.index import (
 )
 
 
-class BaseTechnicalCatalogViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
+class BaseTechnicalCatalogViewSet(CatalogResponseCacheMixin, ActionPermissionMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, DenyReadOnlyWrite, HasSecurityPermission]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     ordering_fields = ["nombre", "codigo", "created_at", "updated_at"]

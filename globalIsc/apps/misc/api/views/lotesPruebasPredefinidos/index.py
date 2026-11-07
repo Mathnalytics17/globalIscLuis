@@ -10,9 +10,10 @@ from apps.misc.api.serializers.lotesPruebasPredefinidos.index import (
     LotePruebasPredefinidoListSerializer,
     LotePruebasPredefinidoSerializer,
 )
+from apps.misc.catalog_cache import CatalogResponseCacheMixin
 
 
-class LotePruebasPredefinidoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
+class LotePruebasPredefinidoViewSet(CatalogResponseCacheMixin, ActionPermissionMixin, viewsets.ModelViewSet):
     pagination_class = StandardResultsSetPagination
     queryset = LotePruebasPredefinido.objects.select_related("tipo_gestion")
     permission_classes = [IsAuthenticated, DenyReadOnlyWrite, HasSecurityPermission]

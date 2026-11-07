@@ -361,10 +361,10 @@ class SecurityRoleSerializer(serializers.ModelSerializer):
         default_home = attrs.get("default_home_path", getattr(self.instance, "default_home_path", ""))
         scope = attrs.get("scope", getattr(self.instance, "scope", None))
         if default_home == "/dashboard" and scope != SecurityRole.Scope.GLOBAL:
-            raise serializers.ValidationError({"default_home_path": "El Dashboard operativo solo se puede asignar a roles Global Oil."})
+            raise serializers.ValidationError({"default_home_path": "El Dashboard operativo solo se puede asignar a roles DATAIA Oil Lab."})
         data_scope = attrs.get("data_scope", getattr(self.instance, "data_scope", SecurityRole.DataScope.OWN_COMPANY))
         if scope == SecurityRole.Scope.GLOBAL and data_scope != SecurityRole.DataScope.ALL_COMPANIES:
-            raise serializers.ValidationError({"data_scope": "Los roles Global Oil deben tener alcance sobre todas las empresas."})
+            raise serializers.ValidationError({"data_scope": "Los roles DATAIA Oil Lab deben tener alcance sobre todas las empresas."})
         return attrs
 
     def get_permissions(self, obj):
