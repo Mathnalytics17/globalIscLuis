@@ -55,9 +55,10 @@ from apps.muestras.api.models.muestras.index import Muestra
 from apps.users.api.data_scope import scope_queryset
 from apps.muestras.services.operational_audit import record_operational_event
 from apps.muestras.api.services.limit_engine import resolve_limit_for_result, resolve_and_evaluate_result
+from apps.misc.catalog_cache import CatalogResponseCacheMixin, get_catalog_response, set_catalog_response
 
 
-class SoftDeleteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
+class SoftDeleteViewSet(CatalogResponseCacheMixin, ActionPermissionMixin, viewsets.ModelViewSet):
     pagination_class = StandardResultsSetPagination
     permission_classes = [IsAuthenticated, DenyReadOnlyWrite, HasSecurityPermission]
     default_read_permission = "config_tecnica.ver"
@@ -183,6 +184,9 @@ class CatalogoTecnicoViewSet(SoftDeleteViewSet):
 
     @action(detail=False, methods=["get"], url_path="sample-form")
     def sample_form(self, request):
+        cached_payload, version = get_catalog_response(request)
+        if cached_payload is not None:
+            return Response(cached_payload)
         tipo = request.query_params.get("tipo_muestra")
         fields = CampoTecnicoMuestra.objects.filter(
             activo=True,
@@ -197,7 +201,9 @@ class CatalogoTecnicoViewSet(SoftDeleteViewSet):
                 catalogo__tipo_muestra__in=[tipo, "ambos"],
             )
         fields = fields.order_by("tipo_muestra", "orden", "nombre_visible")
-        return Response(CampoTecnicoMuestraSampleFormSerializer(fields, many=True).data)
+        payload = CampoTecnicoMuestraSampleFormSerializer(fields, many=True).data
+        set_catalog_response(request, payload, version)
+        return Response(payload)
 
 
 class CatalogoTecnicoVersionViewSet(SoftDeleteViewSet):

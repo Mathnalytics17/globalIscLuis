@@ -218,6 +218,23 @@ class HistorialMuestraSerializer(serializers.ModelSerializer):
         return obj.usuario.get_full_name() or obj.usuario.email or str(obj.usuario_id)
 
 
+class MuestraMachineSummarySerializer(serializers.ModelSerializer):
+    """Small read model for the machine detail page.
+
+    A machine can have years of results. Its detail page only needs a list of
+    associated samples and their workflow state; serializing test payloads and
+    limit structures here made the request slow enough for browsers to abort.
+    """
+
+    class Meta:
+        model = Muestra
+        fields = [
+            "id", "fecha_toma", "observaciones", "estado_operativo",
+            "is_ingresado", "is_resultado_ingresado", "is_revisado",
+            "condicion", "referencia_marca",
+        ]
+
+
 class MuestraListSerializer(serializers.ModelSerializer):
     referencia_equipo_info = serializers.SerializerMethodField()
     referencia_equipo_nombre = serializers.SerializerMethodField()

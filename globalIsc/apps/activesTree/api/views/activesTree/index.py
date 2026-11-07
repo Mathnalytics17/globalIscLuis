@@ -10,6 +10,7 @@ from apps.users.api.data_scope import scope_queryset
 from apps.activesTree.api.serializers.activesTree.index import RecursiveFolderSerializer
 from apps.activesTree.api.models.index import Carpeta
 from apps.activesTree.services import ensure_active_company_roots, _preferred_machine_node
+from apps.activesTree.machine_list_cache import get_related_read_response, set_related_read_response
 from collections import defaultdict
 
 from rest_framework.decorators import action
@@ -35,6 +36,9 @@ class ActivesTreeViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         """
         Retorna solo la estructura jerárquica básica de carpetas
         """
+        cached_payload, cache_token = get_related_read_response(request, "tree")
+        if cached_payload is not None:
+            return Response(cached_payload)
         try:
             # La raíz se mantiene por señales y se reconcilia aquí para las
             # empresas que existían antes de activar esa regla.
@@ -76,10 +80,12 @@ class ActivesTreeViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 context={'children_by_parent': children_by_parent},
             )
             
-            return Response({
+            payload = {
                 "success": True,
                 "structure": serializer.data
-            })
+            }
+            set_related_read_response(payload, cache_token, timeout=120)
+            return Response(payload)
             
         except Exception:
             logger.exception("No se pudo consultar la estructura de carpetas")

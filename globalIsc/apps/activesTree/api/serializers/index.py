@@ -33,6 +33,9 @@ class MaquinaSerializer(serializers.ModelSerializer):
 
     def get_ubicacion_activo(self, obj):
         """Expose the asset-tree path so the machines list identifies its draga/folder."""
+        cached_locations = self.context.get('machine_locations')
+        if cached_locations is not None:
+            return cached_locations.get(obj.id, '')
         folder = obj.maquina_folder.select_related('compania').order_by('id').first()
         if not folder:
             return ''
@@ -54,6 +57,9 @@ class MaquinaSerializer(serializers.ModelSerializer):
 
     def get_puntos_muestreo_activos(self, obj):
         """Count points here so every Machines view can expose the real sampling setup."""
+        annotated_count = getattr(obj, 'puntos_muestreo_activos_count', None)
+        if annotated_count is not None:
+            return annotated_count
         return obj.puntos_muestreo.filter(activo=True).count()
 
     def validate(self, attrs):

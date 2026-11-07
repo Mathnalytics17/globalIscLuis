@@ -21,7 +21,10 @@ services:
   web:
     build: ./globalIsc
     container_name: backend
-    command: gunicorn backend.wsgi:application --bind 0.0.0.0:8000
+    # The local historical ETL submits independent official result workbooks
+    # per batch.  Multiple workers keep one large batch from blocking the
+    # local UI/API while preserving each workbook's transaction boundary.
+    command: gunicorn backend.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 600
     env_file:
       - ${ENV_FILE:-./.env}
     environment:

@@ -112,19 +112,19 @@ class SecurityRoleViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         if not self._is_global():
-            self.permission_denied(self.request, message="Solo GlobalOil puede crear roles.")
+            self.permission_denied(self.request, message="Solo DATAIA Oil Lab puede crear roles.")
         role = serializer.save()
         audit_user_action(self.request, "roles.create", detail=f"Rol creado: {role.code}", metadata={"role_id": role.id})
 
     def perform_update(self, serializer):
         if not self._is_global():
-            self.permission_denied(self.request, message="Solo GlobalOil puede editar roles.")
+            self.permission_denied(self.request, message="Solo DATAIA Oil Lab puede editar roles.")
         role = serializer.save()
         audit_user_action(self.request, "roles.update", detail=f"Rol actualizado: {role.code}", metadata={"role_id": role.id})
 
     def destroy(self, request, *args, **kwargs):
         if not self._is_global():
-            self.permission_denied(request, message="Solo GlobalOil puede desactivar roles.")
+            self.permission_denied(request, message="Solo DATAIA Oil Lab puede desactivar roles.")
         role = self.get_object()
         if not role.editable:
             return Response({"detail": "Este rol no es editable."}, status=status.HTTP_400_BAD_REQUEST)
@@ -136,7 +136,7 @@ class SecurityRoleViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="reactivate")
     def reactivate(self, request, pk=None):
         if not self._is_global():
-            self.permission_denied(request, message="Solo GlobalOil puede reactivar roles.")
+            self.permission_denied(request, message="Solo DATAIA Oil Lab puede reactivar roles.")
         role = self.get_object()
         role.active = True
         role.save(update_fields=["active", "updated_at"])
@@ -152,7 +152,7 @@ class SecurityRoleViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="matrix")
     def matrix(self, request):
         if not self._is_global():
-            self.permission_denied(request, message="Solo GlobalOil puede ver la matriz global de permisos.")
+            self.permission_denied(request, message="Solo DATAIA Oil Lab puede ver la matriz global de permisos.")
         roles = SecurityRole.objects.prefetch_related("role_permissions__permission").filter(active=True)
         permissions = SecurityPermission.objects.filter(active=True).order_by("module", "action")
         return Response({
@@ -163,7 +163,7 @@ class SecurityRoleViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
     def role_matrix(self, request, pk=None):
         """Read the effective matrix for one role without relying on a list fallback."""
         if not self._is_global():
-            self.permission_denied(request, message="Solo GlobalOil puede ver la matriz de permisos.")
+            self.permission_denied(request, message="Solo DATAIA Oil Lab puede ver la matriz de permisos.")
         role = self.get_object()
         payload = self.get_serializer(role).data
         payload["permission_codes"] = [item["code"] for item in payload.get("permissions", [])]
@@ -172,7 +172,7 @@ class SecurityRoleViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["put", "patch"], url_path="matrix")
     def update_matrix(self, request, pk=None):
         if not self._is_global():
-            self.permission_denied(request, message="Solo GlobalOil puede editar la matriz de permisos.")
+            self.permission_denied(request, message="Solo DATAIA Oil Lab puede editar la matriz de permisos.")
         role = self.get_object()
         serializer = self.get_serializer(role, data={"permission_codes": request.data.get("permission_codes", [])}, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -201,7 +201,7 @@ class UserCompanyProfileViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
 
     def _validate_assignable_role(self, role):
         if role and not is_role_assignable_by(self.request.user, role):
-            self.permission_denied(self.request, message="No puede asignar roles GlobalOil o internos.")
+            self.permission_denied(self.request, message="No puede asignar roles DATAIA Oil Lab o internos.")
 
     def perform_create(self, serializer):
         role = serializer.validated_data.get("role")
@@ -249,7 +249,7 @@ class UserDataScopeCompanyViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         if not self._is_global():
-            self.permission_denied(request, message="Solo Global Oil puede gestionar alcances entre empresas.")
+            self.permission_denied(request, message="Solo DATAIA Oil Lab puede gestionar alcances entre empresas.")
 
     def perform_create(self, serializer):
         assignment = serializer.save(assigned_by=self.request.user)
@@ -306,9 +306,9 @@ class UserInvitationViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
         role = serializer.validated_data.get("role")
         transfer_existing = serializer.validated_data.get("transfer_existing", False)
         if transfer_existing and not self._is_global():
-            return Response({"detail": "Solo GlobalOil puede transferir usuarios entre empresas."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "Solo DATAIA Oil Lab puede transferir usuarios entre empresas."}, status=status.HTTP_403_FORBIDDEN)
         if not is_role_assignable_by(request.user, role):
-            return Response({"detail": "No puede asignar roles GlobalOil o internos."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "No puede asignar roles DATAIA Oil Lab o internos."}, status=status.HTTP_403_FORBIDDEN)
         try:
             invitation = create_invitation(
                 email=serializer.validated_data["email"],
@@ -332,7 +332,7 @@ class UserInvitationViewSet(GlobalOrPermissionMixin, viewsets.ModelViewSet):
         self.check_security_permission("usuarios.reenviar_invitacion")
         old_invitation = self.get_object()
         if not is_role_assignable_by(request.user, old_invitation.role):
-            return Response({"detail": "No puede reenviar invitaciones con roles GlobalOil o internos."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "No puede reenviar invitaciones con roles DATAIA Oil Lab o internos."}, status=status.HTTP_403_FORBIDDEN)
         old_invitation.status = UserInvitation.Status.REVOKED
         old_invitation.revoked_at = timezone.now()
         old_invitation.save(update_fields=["status", "revoked_at", "updated_at"])
@@ -453,7 +453,7 @@ class UserSecurityViewSet(GlobalOrPermissionMixin, viewsets.GenericViewSet):
         self.check_security_permission("usuarios.desbloquear")
         target = self.get_object()
         if target.block_scope == User.BlockScope.GLOBAL and not self._is_global():
-            return Response({"detail": "Solo GlobalOil puede desbloquear un bloqueo global."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "Solo DATAIA Oil Lab puede desbloquear un bloqueo global."}, status=status.HTTP_403_FORBIDDEN)
         target.is_active = True
         target.access_status = User.AccessStatus.ACTIVE
         target.blocked_at = None
@@ -489,7 +489,7 @@ class UserSecurityViewSet(GlobalOrPermissionMixin, viewsets.GenericViewSet):
         self.check_security_permission("usuarios.desbloquear")
         target = self.get_object()
         if target.block_scope == User.BlockScope.GLOBAL and not self._is_global():
-            return Response({"detail": "Solo GlobalOil puede restaurar escritura de un bloqueo global."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "Solo DATAIA Oil Lab puede restaurar escritura de un bloqueo global."}, status=status.HTTP_403_FORBIDDEN)
         target.is_read_only = False
         target.access_status = User.AccessStatus.ACTIVE
         target.block_scope = User.BlockScope.NONE
@@ -554,7 +554,7 @@ class UserSecurityViewSet(GlobalOrPermissionMixin, viewsets.GenericViewSet):
         requested_company_id = request.data.get("empresa")
         if requested_company_id and str(requested_company_id) != str(target.empresa_id):
             if not self._is_global():
-                return Response({"detail": "Solo GlobalOil puede cambiar la empresa."}, status=status.HTTP_403_FORBIDDEN)
+                return Response({"detail": "Solo DATAIA Oil Lab puede cambiar la empresa."}, status=status.HTTP_403_FORBIDDEN)
             from apps.misc.api.models.companies.index import Empresa
             try:
                 empresa = Empresa.objects.get(pk=requested_company_id)

@@ -1,5 +1,7 @@
 import base64
 import io
+import json
+import json
 import logging
 import os
 import uuid
@@ -14,7 +16,7 @@ from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.mail import EmailMessage
 from django.db import transaction
-from django.db.models import Count, Max, OuterRef, Q, Subquery
+from django.db.models import Count, Max, OuterRef, Prefetch, Q, Subquery
 from django.http import HttpResponse
 from django.template import Context, Template
 from django.template.loader import get_template
@@ -48,6 +50,7 @@ from apps.users.api.models.index import User
 from apps.users.api.data_scope import scope_queryset, scope_released_reports_queryset
 from apps.users.api.services import audit_user_action
 from apps.muestras.services.operational_audit import record_operational_event
+from apps.reporte.report_list_cache import get_report_list, set_report_list
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 logger = logging.getLogger(__name__)
@@ -606,7 +609,16 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "usuario_emision",
         "usuario_aprobacion",
         "usuario_envio",
-    ).prefetch_related("envios")
+    ).prefetch_related(Prefetch("envios", queryset=ReporteEnvio.objects.select_related("enviado_por", "destinatario_usuario")))
+
+    def list(self, request, *args, **kwargs):
+        cached_payload, version = get_report_list(request)
+        if cached_payload is not None:
+            return Response(cached_payload)
+        response = super().list(request, *args, **kwargs)
+        if response.status_code == 200:
+            set_report_list(request, response.data, version)
+        return response
 
     def _scoped_queryset(self):
         """Reports visible to the caller before applying library filters.
@@ -1972,7 +1984,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             except Exception:
                 firma_src = firma_url
 
-        logo_global = "/media/templates/logo-globaloil.png"
+        logo_global = "/media/templates/logo-dataia.png"
         logo_report = "/media/templates/icon-report.png"
 
         return {
@@ -2051,7 +2063,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                         os.path.join(report_templates_dir, media_path.removeprefix("templates/")),
                     ])
 
-                # globalreport.html usa recursos relativos (./logo-globaloil.jpg, etc.).
+                # globalreport.html usa recursos relativos para su identidad visual.
                 candidates.extend([
                     os.path.join(report_templates_dir, path),
                     os.path.join(media_root, path),

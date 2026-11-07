@@ -506,11 +506,11 @@ def create_invitation(
     if role is None:
         role = default_company_role()
     if role is None or role.scope == SecurityRole.Scope.GLOBAL:
-        raise ValueError("El rol Global Oil no se asigna mediante invitación.")
+        raise ValueError("El rol DATAIA Oil Lab no se asigna mediante invitación.")
     if role.scope == SecurityRole.Scope.INTERNAL and not empresa.is_internal:
-        raise ValueError("Los roles internos solo se pueden invitar a la empresa interna Global Oil.")
+        raise ValueError("Los roles internos solo se pueden invitar a la empresa interna DATAIA Oil Lab.")
     if role.scope == SecurityRole.Scope.COMPANY and empresa.is_internal:
-        raise ValueError("Los roles de empresa deben invitarse a una empresa cliente, no a Global Oil.")
+        raise ValueError("Los roles de empresa deben invitarse a una empresa cliente, no a DATAIA Oil Lab.")
     UserInvitation.objects.filter(
         email__iexact=normalized_email,
         empresa=empresa,
@@ -530,7 +530,7 @@ def create_invitation(
     previous_company_id = None if created else user.empresa_id
     if previous_company_id and previous_company_id != empresa.id and not allow_company_transfer:
         raise ValueError(
-            "El correo ya pertenece a otra empresa. Solo GlobalOil puede transferirlo "
+            "El correo ya pertenece a otra empresa. Solo DATAIA Oil Lab puede transferirlo "
             "mediante una invitación de cambio de empresa."
         )
 
@@ -604,11 +604,11 @@ def deliver_invitation_email(invitation):
 
 def send_invitation_email(invitation):
     invite_url = f"{settings.FRONTEND_URL}users/confirmUser?token={invitation.token}&invite=1"
-    subject = "Invitacion a Global Oil"
+    subject = "Invitación a DATAIA Oil Lab"
     role_name = getattr(invitation.role, "name", "usuario")
     message = (
         f"Hola,\n\n"
-        f"Has sido invitado como {role_name} a Global Oil para la empresa {invitation.empresa.nombre}.\n"
+        f"Has sido invitado como {role_name} a DATAIA Oil Lab para la empresa {invitation.empresa.nombre}.\n"
         f"Completa tu cuenta en el siguiente enlace:\n{invite_url}\n\n"
         f"Este enlace expira el {invitation.expires_at:%d/%m/%Y %H:%M}.\n"
     )
@@ -688,10 +688,10 @@ def accept_invitation(token, first_name, last_name, password="", phone="", avata
 
 
 def send_welcome_email(user):
-    subject = "Cuenta Global Oil activada"
+    subject = "Cuenta DATAIA Oil Lab activada"
     message = (
         f"Hola {user.get_full_name() or user.email},\n\n"
-        f"Tu cuenta de Global Oil fue activada correctamente.\n"
+        f"Tu cuenta de DATAIA Oil Lab fue activada correctamente.\n"
         f"Puedes ingresar desde {settings.FRONTEND_URL}users/login\n"
     )
     send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False)

@@ -7,7 +7,7 @@ from django.http import FileResponse, Http404, JsonResponse
 from django.db.models import Q
 
 
-PUBLIC_TEMPLATE_ASSETS = {"templates/logo-globaloil.png", "templates/icon-report.png"}
+PUBLIC_TEMPLATE_ASSETS = {"templates/logo-dataia.png", "templates/icon-report.png"}
 
 
 def private_media(request, path):

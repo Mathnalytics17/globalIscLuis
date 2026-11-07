@@ -9,9 +9,10 @@ from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPer
 from apps.misc.api.models.tipoGestionMuestra.index import TipoGestionMuestra
 from apps.misc.api.serializers.tipoGestionMuestra.index import TipoGestionMuestraSerializer
 from apps.users.api.models.index import User
+from apps.misc.catalog_cache import CatalogResponseCacheMixin
 
 
-class TipoGestionMuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
+class TipoGestionMuestraViewSet(CatalogResponseCacheMixin, ActionPermissionMixin, viewsets.ModelViewSet):
     serializer_class = TipoGestionMuestraSerializer
     permission_classes = [IsAuthenticated, DenyReadOnlyWrite, HasSecurityPermission]
     permission_action_map = {

@@ -394,7 +394,9 @@ def _validate_result_value(field, value):
         try:
             Decimal(str(value).replace(",", "."))
         except (InvalidOperation, TypeError, ValueError):
-            return "Ingrese un valor numÃ©rico vÃ¡lido."
+            qualified_number = r"^\s*(?:<=|>=|<|>)\s*(?:\d+(?:[\.,]\d*)?|[\.,]\d+)\s*$"
+            if not re.match(qualified_number, str(value)):
+                return "Ingrese un valor numérico válido o un valor calificado como <1."
 
     if tipo == "booleano":
         normalized = str(value).strip().casefold()
@@ -1536,7 +1538,8 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         return scope_queryset(queryset, self.request.user, "cliente_empresa_id")
 
     def _scope_sample_tests(self, queryset=None):
-        queryset = queryset or PruebaMuestra.objects.all()
+        if queryset is None:
+            queryset = PruebaMuestra.objects.all()
         return scope_queryset(queryset, self.request.user, "muestra__lote__cliente_empresa_id")
 
     def _scope_samples(self, queryset=None):
@@ -2058,6 +2061,11 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Historical imports may legitimately omit component values that were
+        # absent from the source laboratory export.  The importer opts in to
+        # this narrow exception; ordinary UI confirmations keep requiring all
+        # configured fields.
+        allow_incomplete_historical = bool(request.data.get("allow_incomplete_historical"))
         results = {}
         incomplete = []
         for sample_test in sample_tests:
@@ -2074,7 +2082,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 for field in _build_result_fields(sample_test)
                 if value_by_key.get(field.get("key")) in [None, ""]
             ]
-            if not result or missing_fields:
+            if not result or (missing_fields and not allow_incomplete_historical):
                 incomplete.append({
                     "prueba_muestra": sample_test.id,
                     "muestra": str(sample_test.muestra_id),
@@ -2742,15 +2750,18 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 })
                 continue
 
-            index = {name: headers.index(name) + 1 for name in headers if name}
-            for row_number in range(2, worksheet_rows[ws.title] + 1):
-                prueba_muestra_id = ws.cell(row_number, index["PruebaMuestraID"]).value
-                field_key = ws.cell(row_number, index["CampoKey"]).value
-                value = ws.cell(row_number, index["Valor"]).value
-                lote_id = ws.cell(row_number, index["Lote"]).value
-                sample_id = ws.cell(row_number, index["Muestra"]).value
-                row_token = ws.cell(row_number, index["Token"]).value
-                observation = ws.cell(row_number, index.get("Observaciones", 0)).value if index.get("Observaciones") else ""
+            index = {name: headers.index(name) for name in headers if name}
+            for row_number, cells in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                def cell_value(name, default=None):
+                    position = index.get(name)
+                    return cells[position] if position is not None and position < len(cells) else default
+                prueba_muestra_id = cell_value("PruebaMuestraID")
+                field_key = cell_value("CampoKey")
+                value = cell_value("Valor")
+                lote_id = cell_value("Lote")
+                sample_id = cell_value("Muestra")
+                row_token = cell_value("Token")
+                observation = cell_value("Observaciones", "")
 
                 if value in [None, ""]:
                     continue

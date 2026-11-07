@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from apps.utils.pagination import StandardResultsSetPagination
 from permissions import ActionPermissionMixin, DenyReadOnlyWrite, HasSecurityPermission
 from apps.muestras.services.operational_audit import record_operational_event
+from apps.misc.catalog_cache import CatalogResponseCacheMixin
 
 from apps.misc.api.models.pruebas.index import Prueba
 from apps.misc.api.serializers.pruebas.index import (
@@ -14,7 +15,7 @@ from apps.misc.api.serializers.pruebas.index import (
 )
 
 
-class PruebaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
+class PruebaViewSet(CatalogResponseCacheMixin, ActionPermissionMixin, viewsets.ModelViewSet):
     pagination_class = StandardResultsSetPagination
     queryset = Prueba.objects.all()
     permission_classes = [IsAuthenticated, DenyReadOnlyWrite, HasSecurityPermission]

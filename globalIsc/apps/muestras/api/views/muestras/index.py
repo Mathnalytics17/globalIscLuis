@@ -17,10 +17,12 @@ from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
 from apps.muestras.api.serializers.muestras.index import (
     CreateMuestraSerializer,
     HistorialMuestraSerializer,
+    MuestraMachineSummarySerializer,
     MuestraListSerializer,
     MuestraSerializer,
 )
 from apps.muestras.services.operational_audit import record_operational_event
+from apps.activesTree.machine_list_cache import get_related_read_response, set_related_read_response
 from apps.activesTree.api.models.index import AsignacionPuntoMuestreo, PuntoMuestreo
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,7 @@ def muestra_queryset():
         "resultados__usuario_solicitud",
         "resultados__usuario_medicion",
         "resultados__usuario_revision",
+        "asignaciones_punto_muestreo__punto_muestreo",
     )
 
 
@@ -78,14 +81,29 @@ class MuestraViewSetList(ActionPermissionMixin, viewsets.ModelViewSet):
     serializer_class = MuestraListSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        machine_id = str(self.request.query_params.get("referencia_equipo") or "").strip()
+        # The machine detail page needs workflow metadata, not all result
+        # payloads. Start from a minimal queryset before applying tenant scope.
+        queryset = Muestra.objects.all() if self.action == "list" and machine_id else super().get_queryset()
         user = self.request.user
         company_ids = accessible_company_ids(user)
-        if company_ids is None:
-            return queryset
-        return queryset.filter(
+        if company_ids is not None:
+            queryset = queryset.filter(
             Q(lote__cliente_empresa_id__in=company_ids) | Q(referencia_equipo__empresa_id__in=company_ids)
         ).distinct()
+        oa_origen = str(self.request.query_params.get("oa_origen") or "").strip()
+        if oa_origen:
+            queryset = queryset.filter(campos_adicionales__oa_origen=oa_origen)
+        if machine_id:
+            queryset = queryset.filter(referencia_equipo_id=machine_id)
+        batch_id = str(self.request.query_params.get("lote") or "").strip()
+        if batch_id:
+            queryset = queryset.filter(lote_id=batch_id)
+        if self.request.query_params.get("include_invalid") not in ("1", "true", "True"):
+            queryset = queryset.filter(estado_operativo="activa")
+        if machine_id:
+            queryset = queryset.order_by("-fecha_toma", "-fecha_registro")
+        return queryset
 
     def list(self, request, *args, **kwargs):
         try:
@@ -120,16 +138,32 @@ class MuestraViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         queryset = super().get_queryset()
         user = self.request.user
         company_ids = accessible_company_ids(user)
-        if company_ids is None:
-            return queryset
-        return queryset.filter(
-            Q(lote__cliente_empresa_id__in=company_ids) | Q(referencia_equipo__empresa_id__in=company_ids)
-        ).distinct()
+        if company_ids is not None:
+            queryset = queryset.filter(
+                Q(lote__cliente_empresa_id__in=company_ids) | Q(referencia_equipo__empresa_id__in=company_ids)
+            ).distinct()
+        oa_origen = str(self.request.query_params.get("oa_origen") or "").strip()
+        if oa_origen:
+            queryset = queryset.filter(campos_adicionales__oa_origen=oa_origen)
+        return queryset
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
             return CreateMuestraSerializer
+        if self.action == "list" and self.request.query_params.get("referencia_equipo"):
+            return MuestraMachineSummarySerializer
         return MuestraSerializer
+
+    def list(self, request, *args, **kwargs):
+        if not request.query_params.get("referencia_equipo"):
+            return super().list(request, *args, **kwargs)
+        cached_payload, cache_token = get_related_read_response(request, "machine-samples")
+        if cached_payload is not None:
+            return Response(cached_payload)
+        response = super().list(request, *args, **kwargs)
+        if response.status_code == 200:
+            set_related_read_response(response.data, cache_token, timeout=45)
+        return response
 
     def create(self, request, *args, **kwargs):
         try:

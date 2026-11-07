@@ -46,9 +46,9 @@ class User(AbstractUser):
         OWN_COMPANY = "OWN_COMPANY", "Solo su empresa"
         ALL_COMPANIES = "ALL_COMPANIES", "Todas las empresas"
         ASSIGNED_COMPANIES = "ASSIGNED_COMPANIES", "Empresas asignadas"
-        GLOBAL_OIL_ONLY = "GLOBAL_OIL_ONLY", "Solo Global Oil"
+        GLOBAL_OIL_ONLY = "GLOBAL_OIL_ONLY", "Solo DATAIA Oil Lab"
     class Role(models.TextChoices):
-        GLOBAL= "GLOBAL", "GlobalOil"
+        GLOBAL= "GLOBAL", "DATAIA Oil Lab"
         ADMIN = "ADMINISTRADOR", "Administrador"
         EMPRESA = "EMPRESA", "Empresa"
         LABORATORISTA = "LABORATORISTA", "Laboratorista"
@@ -63,7 +63,7 @@ class User(AbstractUser):
 
     class BlockScope(models.TextChoices):
         NONE = "NONE", "Sin bloqueo"
-        GLOBAL = "GLOBAL", "Bloqueo GlobalOil"
+        GLOBAL = "GLOBAL", "Bloqueo DATAIA Oil Lab"
         COMPANY = "COMPANY", "Bloqueo empresa"
 
     username = None
@@ -170,7 +170,7 @@ class PasswordResetToken(models.Model):
 
 class SecurityRole(models.Model):
     class Scope(models.TextChoices):
-        GLOBAL = "GLOBAL", "GlobalOil"
+        GLOBAL = "GLOBAL", "DATAIA Oil Lab"
         COMPANY = "COMPANY", "Empresa"
         INTERNAL = "INTERNAL", "Interno"
 
@@ -178,7 +178,7 @@ class SecurityRole(models.Model):
         OWN_COMPANY = "OWN_COMPANY", "Solo su empresa"
         ALL_COMPANIES = "ALL_COMPANIES", "Todas las empresas"
         ASSIGNED_COMPANIES = "ASSIGNED_COMPANIES", "Empresas asignadas"
-        GLOBAL_OIL_ONLY = "GLOBAL_OIL_ONLY", "Solo Global Oil"
+        GLOBAL_OIL_ONLY = "GLOBAL_OIL_ONLY", "Solo DATAIA Oil Lab"
 
     name = models.CharField(max_length=120)
     code = models.SlugField(max_length=80, unique=True)

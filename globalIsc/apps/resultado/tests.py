@@ -381,6 +381,20 @@ class ResultEntryTests(TestCase):
         result = Resultado.objects.get(prueba_muestra=self.sample_test)
         self.assertEqual(result.estatus, "preliminar")
 
+    def test_numeric_result_accepts_detection_limit_qualifier_without_coercion(self):
+        form = self.client.get(
+            f"/api/lubrication/result-entry/sample-tests/{self.sample_test.id}/form/"
+        )
+        self.assertEqual(form.status_code, 200, form.data)
+        response = self.client.post(
+            f"/api/lubrication/result-entry/sample-tests/{self.sample_test.id}/save-draft/",
+            {"values": [{"key": form.data["fields"][0]["key"], "value": "<1", "observacion": "Límite de detección"}]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        result = Resultado.objects.get(prueba_muestra=self.sample_test)
+        self.assertEqual(json.loads(result.resultado)["values"][0]["value"], "<1")
+
     def test_repeating_the_same_correction_confirmation_is_idempotent(self):
         reviewed_test = Prueba.objects.create(
             nombre_variable="Ensayo ya revisado",
