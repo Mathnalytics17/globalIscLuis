@@ -1,3 +1,6 @@
+import json
+from datetime import timedelta
+
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -7,6 +10,9 @@ from apps.activesTree.services import ensure_machine_tree_node
 from apps.misc.api.models.companies.index import Empresa
 from apps.muestras.api.models.loteMuestras.index import LoteMuestras
 from apps.muestras.api.models.muestras.index import Muestra
+from apps.muestras.api.models.pruebasMuestra.index import PruebaMuestra
+from apps.misc.api.models.pruebas.index import Prueba
+from apps.resultado.api.models.index import Resultado
 from apps.users.api.models.index import User
 
 
@@ -36,6 +42,32 @@ class SamplingPointApiTests(APITestCase):
         }, format='json')
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data['empresa_id'], self.company.id)
+
+    def test_machine_list_exposes_sampling_point_code_for_code_lookup(self):
+        point = PuntoMuestreo.objects.create(
+            maquina=self.machine, nombre='Malacate de proa', codigo='100015377',
+        )
+
+        response = self.client.get('/api/machines/?page_size=100')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        machine = next(row for row in response.data['results'] if row['id'] == self.machine.id)
+        self.assertIn(
+            {'id': point.id, 'nombre': 'Malacate de proa', 'codigo': '100015377'},
+            machine['puntos_muestreo'],
+        )
+
+    def test_point_code_resolver_returns_point_and_its_owner_machine(self):
+        point = PuntoMuestreo.objects.create(
+            maquina=self.machine, nombre='Malacate de proa', codigo='100015377',
+        )
+
+        response = self.client.get('/api/machines/resolve-point-code/?code=100015377')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], point.id)
+        self.assertEqual(response.data['results'][0]['maquina']['id'], self.machine.id)
 
     def test_company_root_is_created_automatically(self):
         self.assertTrue(Carpeta.objects.filter(
@@ -204,3 +236,30 @@ class SamplingPointApiTests(APITestCase):
         point_row = by_point.data['results'][0]
         self.assertEqual(machine_row['muestras_coincidentes'], 1)
         self.assertEqual(point_row['muestras_coincidentes'], 1)
+
+    def test_history_returns_all_result_rows_and_orders_migration_ties_by_source_row(self):
+        point = PuntoMuestreo.objects.create(maquina=self.machine, nombre='Punto histórico', codigo='100015377')
+        same_day = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        for source_order in range(21, 0, -1):
+            sample = Muestra.objects.create(
+                id=f'M2098{source_order:04d}', lote=self.batch, fecha_toma=same_day,
+                referencia_equipo=self.machine, usuario_registro=self.user,
+                campos_adicionales={'orden_migracion_origen': source_order},
+            )
+            AsignacionPuntoMuestreo.objects.create(muestra=sample, punto_muestreo=point, asignado_por=self.user)
+            test = Prueba.objects.create(nombre_variable=f'Histórico {source_order}', acronimo=f'H{source_order:04d}')
+            assignment = PruebaMuestra.objects.create(muestra=sample, prueba=test, usuario_solicitud=self.user)
+            Resultado.objects.create(
+                prueba_muestra=assignment,
+                resultado=json.dumps({'fields': [{'key': 'valor', 'label': 'Valor', 'tipo_dato': 'numerico'}], 'values': [{'key': 'valor', 'value': str(source_order)}]}),
+                fecha_medicion=same_day + timedelta(minutes=source_order), usuario_medicion=self.user,
+            )
+
+        response = self.client.get(f'/api/machines/{self.machine.id}/history/')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsInstance(response.data, list)
+        self.assertEqual(len(response.data), 21)
+        self.assertEqual(response.data[0]['sampleId'], 'M20980001')
+        self.assertEqual(response.data[0]['sourceOrder'], 1)
+        self.assertEqual(response.data[0]['pointCode'], '100015377')

@@ -64,18 +64,36 @@ def stable_code(*parts):
     return "PM-" + hashlib.sha1(text.encode("utf-8")).hexdigest()[:12].upper()
 
 
+def plate_code(value):
+    """Return the source PLACA as the business code of a sampling point."""
+    value = norm(value)
+    # A numeric Excel cell can be rendered as 100015377.0; its physical code
+    # is textual and must not acquire that display suffix.
+    return re.sub(r"^(\d+)\.0+$", r"\1", value)
+
+
+def has_source_plate(value):
+    """Whether PLACA is a usable source identifier, rather than a placeholder."""
+    return plate_code(value).upper() not in {"", "-", "DESCONOCIDO", "DESCONOCIDA", "N/A", "NA"}
+
+
 def split_machine_and_point(equipment):
     """Extract the parent dredge from a legacy equipment/punto description."""
     text = norm(equipment)
     match = re.search(r"\b(DRAGA\s+(?:NO\.?|N[ºO]?\.?|#)?\s*\d+)\b", text, re.I)
     if not match:
-        return text, "Punto principal"
+        # No separate point was supplied.  The source machine is therefore
+        # also the sampling point name; never create a generic placeholder.
+        return text, text
     # `DRAGA No.5`, `DRAGA No. 5`, `DRAGA N°5` and `DRAGA #5` are the
     # same physical machine.  Rebuild from the numeric identity, never by
     # formatting the source substring.
     number = re.search(r"\d+", match.group(1)).group(0)
     machine = f"DRAGA No.{int(number)}"
-    point = norm((text[:match.start()] + text[match.end():]).strip(" -/|")) or "Punto principal"
+    # The position of the dredge number varies in legacy exports, but the
+    # remaining description is business data.  Do not infer equivalence
+    # between terms such as "reductor malacate" and "malacate de proa".
+    point = norm((text[:match.start()] + text[match.end():]).strip(" -/|")) or machine
     return machine, point
 
 
@@ -93,6 +111,67 @@ def write_jsonl(path, rows):
             target.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def build_point_rows(rows):
+    """Create one point per source-backed physical identity.
+
+    A real PLACA is the business identity within a machine.  Different names
+    with that same code are aliases of one point; the first Excel spelling is
+    the visible name and all spellings remain auditable in ``punto_origen``.
+    When no real plate exists, the source point name is the only identity.
+    """
+    points = {}
+    for row in rows:
+        company, equipment, lubricant, system = (norm(row.get(key)) for key in ("CLIENTE", "EQUIPO", "LUBRICANTE", "Tipo"))
+        machine, point_name = split_machine_and_point(equipment)
+        if not company or not machine:
+            continue
+        plate = plate_code(row.get("PLACA"))
+        key = (company, machine, "placa", plate) if has_source_plate(plate) else (company, machine, "nombre", point_name)
+        point = points.setdefault(key, {
+            "empresa_origen": company, "maquina_origen": machine,
+            "nombres_origen": [], "lubricantes_historicos": set(),
+            "tipos_historicos": set(), "placas_historicas": set(),
+            "nombre_punto": point_name,
+        })
+        if point_name not in point["nombres_origen"]:
+            point["nombres_origen"].append(point_name)
+        if plate:
+            point["placas_historicas"].add(plate)
+        if lubricant:
+            point["lubricantes_historicos"].add(lubricant)
+        if system:
+            point["tipos_historicos"].add(system)
+
+    point_rows = []
+    for point in points.values():
+        plates = sorted(point["placas_historicas"], key=str.casefold)
+        point["punto_origen"] = " | ".join(point.pop("nombres_origen"))
+        point["placas_historicas"] = " | ".join(plates)
+        point["lubricantes_historicos"] = " | ".join(sorted(point["lubricantes_historicos"], key=str.casefold))
+        point["tipos_historicos"] = " | ".join(sorted(point["tipos_historicos"], key=str.casefold))
+        if len(plates) == 1 and has_source_plate(plates[0]):
+            point["codigo_punto"], point["estado"] = plates[0], "LISTO_PLACA"
+        elif not plates:
+            point["codigo_punto"] = stable_code(point["empresa_origen"], point["maquina_origen"], point["nombre_punto"])
+            point["estado"] = "PENDIENTE_SIN_PLACA"
+        else:
+            point["codigo_punto"] = stable_code(point["empresa_origen"], point["maquina_origen"], point["nombre_punto"])
+            point["estado"] = "REVISAR_PLACA_AMBIGUA"
+        point_rows.append(point)
+    # The application correctly enforces a unique visible name per machine.
+    # Some legacy rows reuse a name while supplying different PLACA values.
+    # Keep both physical identities and make only the display label explicit;
+    # the original source name remains in ``punto_origen``.
+    by_visible_name = defaultdict(list)
+    for point in point_rows:
+        by_visible_name[(point["empresa_origen"], point["maquina_origen"], point["nombre_punto"])].append(point)
+    for duplicates in by_visible_name.values():
+        if len(duplicates) > 1:
+            for point in duplicates:
+                point["nombre_punto"] = f'{point["nombre_punto"]} · {point["codigo_punto"]}'
+    return sorted(point_rows, key=lambda item: (item["empresa_origen"].casefold(), item["maquina_origen"].casefold(), item["nombre_punto"].casefold()))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Genera homologaciones de dominio desde staging Global Oil.")
     parser.add_argument("--artifacts", type=Path, default=Path("outputs/migracion_historica_global_oil"))
@@ -100,16 +179,10 @@ def main():
     raw_path = args.artifacts / "staging" / "reportes_oa_raw.jsonl"
     if not raw_path.is_file(): parser.error("No existe staging/reportes_oa_raw.jsonl")
     rows = [json.loads(line)["data"] for line in raw_path.open(encoding="utf-8") if line.strip()]
-    points, lubricants = {}, {}
+    point_rows = build_point_rows(rows)
+    lubricants = {}
     for row in rows:
-        company, equipment, lubricant, system = (norm(row.get(key)) for key in ("CLIENTE", "EQUIPO", "LUBRICANTE", "Tipo"))
-        machine, point_name = split_machine_and_point(equipment)
-        if company and machine:
-            key = (company, machine, point_name)
-            point_code = stable_code(*key)
-            point = points.setdefault(key, {"empresa_origen": company, "maquina_origen": machine, "punto_origen": point_name, "lubricantes_historicos": set(), "tipos_historicos": set(), "codigo_punto": point_code, "nombre_punto": point_name, "estado": "PENDIENTE_API"})
-            if lubricant: point["lubricantes_historicos"].add(lubricant)
-            if system: point["tipos_historicos"].add(system)
+        lubricant = norm(row.get("LUBRICANTE"))
         if lubricant:
             brand, reference, status = "", lubricant, "PENDIENTE_REVISION"
             for pattern, candidate in BRANDS:
@@ -118,13 +191,7 @@ def main():
                     reference = norm(re.sub(pattern, "", lubricant, flags=re.I)).strip(" -/") or lubricant
                     break
             lubricants[lubricant] = {"origen": lubricant, "marca": brand, "referencia": reference, "estado": status}
-    point_rows = []
-    for point in points.values():
-        point["lubricantes_historicos"] = " | ".join(sorted(point["lubricantes_historicos"], key=str.casefold))
-        point["tipos_historicos"] = " | ".join(sorted(point["tipos_historicos"], key=str.casefold))
-        point_rows.append(point)
-    point_rows.sort(key=lambda item: (item["empresa_origen"].casefold(), item["maquina_origen"].casefold(), item["nombre_punto"].casefold()))
-    write_csv(args.artifacts / "homologacion" / "puntos_medicion.csv", point_rows, ["empresa_origen", "maquina_origen", "punto_origen", "lubricantes_historicos", "tipos_historicos", "codigo_punto", "nombre_punto", "estado"])
+    write_csv(args.artifacts / "homologacion" / "puntos_medicion.csv", point_rows, ["empresa_origen", "maquina_origen", "punto_origen", "lubricantes_historicos", "tipos_historicos", "placas_historicas", "codigo_punto", "nombre_punto", "estado"])
     lubricant_rows = sorted(lubricants.values(), key=lambda item: item["origen"].casefold())
     write_csv(args.artifacts / "homologacion" / "lubricantes_dominio.csv", lubricant_rows, ["origen", "marca", "referencia", "estado"])
     layout = [{"prueba": "ELEMENTOS", "resultado": metal, "campo": metal, "unidad": "ppm", "origen": metal} for metal in METALS]

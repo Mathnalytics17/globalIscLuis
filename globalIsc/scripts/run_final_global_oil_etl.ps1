@@ -24,9 +24,15 @@ $scriptRoot = Split-Path -Parent $PSCommandPath
 $projectRoot = Split-Path -Parent $scriptRoot
 $backendRoot = Split-Path -Parent $projectRoot
 $artifacts = "outputs\migracion_historica_global_oil"
-$pythonExecutable = (Get-Command python -ErrorAction SilentlyContinue).Source
-if (-not $pythonExecutable -and (Test-Path -LiteralPath "C:\ProgramData\anaconda3\python.exe")) {
+$linuxArtifacts = $artifacts -replace '\\', '/'
+# Windows can expose a Microsoft Store ``python.exe`` alias that exists but
+# cannot execute Python. Prefer the known local Anaconda interpreter when it
+# is installed; otherwise use the PATH command.
+$pythonExecutable = $null
+if (Test-Path -LiteralPath "C:\ProgramData\anaconda3\python.exe") {
     $pythonExecutable = "C:\ProgramData\anaconda3\python.exe"
+} else {
+    $pythonExecutable = (Get-Command python -ErrorAction SilentlyContinue).Source
 }
 if (-not $pythonExecutable) {
     throw "No se encontró Python. Instale Python 3 o agregue python al PATH antes de ejecutar la ETL."
@@ -35,7 +41,13 @@ if (-not $pythonExecutable) {
 function Invoke-EtlPython {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
     & $pythonExecutable @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "Falló: $pythonExecutable $($Arguments -join ' ')" }
+    if ($LASTEXITCODE -ne 0) {
+        $safeArguments = @($Arguments)
+        for ($index = 0; $index -lt $safeArguments.Count - 1; $index++) {
+            if ($safeArguments[$index] -eq "--password") { $safeArguments[$index + 1] = "***" }
+        }
+        throw "Falló: $pythonExecutable $($safeArguments -join ' ')"
+    }
 }
 
 if ($ResetLocal -and -not $Apply) {
@@ -106,12 +118,24 @@ try {
     Invoke-EtlPython scripts\assign_physical_tests_via_api.py @common @auth
     # The bulk Excel endpoint can exceed its HTTP timeout on historical batches.
     # The shard runner stores a checkpoint after every form and is resumable.
-    Invoke-EtlPython scripts\run_physical_api_shards.py
+    $previousPhysicalPassword = $env:DATAIA_IMPORT_PASSWORD
+    try {
+        $env:DATAIA_IMPORT_PASSWORD = $Password
+        Invoke-EtlPython scripts\run_physical_api_shards.py --password-env DATAIA_IMPORT_PASSWORD
+    }
+    finally {
+        if ($null -eq $previousPhysicalPassword) {
+            Remove-Item Env:DATAIA_IMPORT_PASSWORD -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:DATAIA_IMPORT_PASSWORD = $previousPhysicalPassword
+        }
+    }
     Invoke-EtlPython scripts\advance_historical_reports_via_api.py @common @auth --resume
     if (-not $SkipFinalVerification) {
         Push-Location $backendRoot
         try {
-            docker compose -p globaloil-local --env-file .env.local -f docker-compose.prod.yml -f docker-compose.local.yml exec -T web python manage.py verify_global_oil_import --artifacts "/usr/src/globalIsc/$artifacts"
+            docker compose -p globaloil-local --env-file .env.local -f docker-compose.prod.yml -f docker-compose.local.yml exec -T web python manage.py verify_global_oil_import --artifacts "/usr/src/globalIsc/$linuxArtifacts"
             if ($LASTEXITCODE -ne 0) { throw "Falló la verificación final de importación." }
         } finally { Pop-Location }
     }

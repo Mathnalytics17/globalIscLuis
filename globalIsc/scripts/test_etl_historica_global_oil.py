@@ -11,7 +11,7 @@ from pathlib import Path
 from openpyxl import Workbook
 
 sys.path.insert(0, str(Path(__file__).parent))
-from etl_historica_global_oil import MASTER_COLUMNS, SAMPLE_COLUMNS, make_artifacts
+from etl_historica_global_oil import MASTER_COLUMNS, SAMPLE_COLUMNS, apply_client_scope, make_artifacts
 
 
 class HistoricEtlTest(unittest.TestCase):
@@ -43,7 +43,7 @@ class HistoricEtlTest(unittest.TestCase):
             knowledge_book.active.append(["Ag", "1"])
             knowledge_book.save(knowledge)
 
-            manifest = make_artifacts(reports, knowledge, output, replace=False)
+            manifest = make_artifacts(reports, knowledge, output, replace=False, client_scope="all")
 
             self.assertEqual(manifest["controls"]["records"], 1)
             self.assertEqual(manifest["controls"]["unique_oa"], 1)
@@ -82,9 +82,17 @@ class HistoricEtlTest(unittest.TestCase):
             knowledge_book.active.append(["Metal", "Límite"])
             knowledge_book.save(knowledge)
 
-            manifest = make_artifacts(reports, knowledge, output, replace=False)
+            manifest = make_artifacts(reports, knowledge, output, replace=False, client_scope="all")
 
             self.assertEqual(manifest["controls"]["records"], 1)
+
+    def test_mineros_scope_keeps_sas_and_sas_bic_legal_spellings(self):
+        rows = [
+            {"CLIENTE": "MINEROS ALUVIAL S.A.S.", "OA": "old"},
+            {"CLIENTE": "MINEROS ALUVIAL SAS BIC", "OA": "new"},
+        ]
+        selected = apply_client_scope(rows, "mineros")
+        self.assertEqual([row["OA"] for row in selected], ["old", "new"])
 
 
 if __name__ == "__main__":

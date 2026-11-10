@@ -11,6 +11,7 @@ class MaquinaSerializer(serializers.ModelSerializer):
     empresa_info = serializers.SerializerMethodField(read_only=True)
     ubicacion_activo = serializers.SerializerMethodField(read_only=True)
     puntos_muestreo_activos = serializers.SerializerMethodField(read_only=True)
+    puntos_muestreo = serializers.SerializerMethodField(read_only=True)
     parent_folder = serializers.PrimaryKeyRelatedField(
         queryset=Carpeta.objects.all(), write_only=True, required=False,
     )
@@ -61,6 +62,21 @@ class MaquinaSerializer(serializers.ModelSerializer):
         if annotated_count is not None:
             return annotated_count
         return obj.puntos_muestreo.filter(activo=True).count()
+
+    def get_puntos_muestreo(self, obj):
+        """Expose active point identities so a machine can be found by code.
+
+        A point code is a business identifier, not a machine code. Returning
+        it with its owner lets the UI resolve the code without inventing a
+        relationship or changing source data.
+        """
+        points = getattr(obj, 'active_sampling_points', None)
+        if points is None:
+            points = obj.puntos_muestreo.filter(activo=True).only('id', 'maquina_id', 'nombre', 'codigo')
+        return [
+            {'id': point.id, 'nombre': point.nombre, 'codigo': point.codigo}
+            for point in points
+        ]
 
     def validate(self, attrs):
         empresa = attrs.get('empresa') or getattr(self.instance, 'empresa', None)

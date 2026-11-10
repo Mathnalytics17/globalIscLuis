@@ -7,17 +7,28 @@ grouped by company/month and capped at 50 samples so they remain usable in the
 normal reception and laboratory workflow.
 """
 import argparse
+import csv
 import json
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from etl_global_oil_domain import norm, split_machine_and_point, stable_code
+from etl_global_oil_domain import has_source_plate, norm, plate_code, split_machine_and_point
 from load_global_oil_via_api import Api
 
 
 def rows(path):
-    return [json.loads(line)["data"] for line in path.open(encoding="utf-8") if line.strip()]
+    source = []
+    for line in path.open(encoding="utf-8"):
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        row = dict(record["data"])
+        # This is provenance, not a fabricated timestamp.  It resolves only
+        # equal sampling dates in the historical trend view.
+        row["_orden_migracion_origen"] = record.get("source_row")
+        source.append(row)
+    return source
 
 
 def as_date(value):
@@ -103,6 +114,7 @@ def sample_payload(row, point_id, atributos_tecnicos):
         "atributos_tecnicos": atributos_tecnicos,
         "campos_adicionales": {
             "oa_origen": str(row.get("OA") or "").strip(),
+            "orden_migracion_origen": row.get("_orden_migracion_origen"),
             "fecha_reporte_origen": as_date(row.get("FECHA")),
             "tipo_sistema_origen": norm(row.get("Tipo")),
             "grado_viscosidad_origen": norm(row.get("Viscosidad")),
@@ -148,6 +160,22 @@ def main():
     parser.add_argument("--email"); parser.add_argument("--password"); parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     source = rows(args.artifacts / "staging" / "reportes_oa_raw.jsonl")
+    point_rows = list(csv.DictReader((args.artifacts / "homologacion" / "puntos_medicion.csv").open(encoding="utf-8-sig")))
+    point_specs = {}
+    for item in point_rows:
+        point_spec = {
+            "codigo": norm(item["codigo_punto"]),
+            "estado": item["estado"],
+            "nombre": norm(item["nombre_punto"]),
+        }
+        company = norm(item["empresa_origen"])
+        machine = norm(item["maquina_origen"])
+        if item["estado"] == "LISTO_PLACA":
+            point_specs[(company, machine, "placa", point_spec["codigo"])] = point_spec
+        else:
+            source_names = [item["nombre_punto"], *(item.get("punto_origen") or "").split("|")]
+            for source_name in source_names:
+                point_specs[(company, machine, "nombre", norm(source_name))] = point_spec
     rejected = []
     eligible = []
     for row in source:
@@ -197,12 +225,22 @@ def main():
             matches = [item for item in api.get("machines/", {"empresa": company_id, "search": machine}) if norm(item.get("nombre")) == machine]
             if not matches: raise RuntimeError(f"Máquina inexistente en API: {company} / {machine}")
             machine_id = machine_cache[machine_key] = matches[0]["id"]
-        code = stable_code(company, machine, point)
-        point_id = point_cache.get(code)
+        source_plate = plate_code(row.get("PLACA"))
+        identity = (company, machine, "placa", source_plate) if has_source_plate(source_plate) else (company, machine, "nombre", point)
+        point_spec = point_specs.get(identity)
+        if not point_spec:
+            raise RuntimeError(f"Punto no homologado en artefactos: {company} / {machine} / {point}")
+        code, sourced_by_plate = point_spec["codigo"], point_spec["estado"] == "LISTO_PLACA"
+        point_key = (machine_id, "placa", code) if sourced_by_plate else (machine_id, "nombre", point, code)
+        point_id = point_cache.get(point_key)
         if point_id is None:
-            matches = [item for item in api.get("sampling-points/", {"machine": machine_id}) if item.get("codigo") == code]
-            if not matches: raise RuntimeError(f"Punto inexistente en API: {company} / {machine} / {point}")
-            point_id = point_cache[code] = matches[0]["id"]
+            matches = [item for item in api.get("sampling-points/", {"machine": machine_id}) if norm(item.get("codigo")) == code] if sourced_by_plate else [item for item in api.get("sampling-points/", {"machine": machine_id}) if (
+                norm(item.get("nombre")) == point_spec["nombre"] and norm(item.get("codigo")) == code
+            )]
+            if not matches:
+                available = [(norm(item.get("nombre")), norm(item.get("codigo"))) for item in api.get("sampling-points/", {"machine": machine_id})]
+                raise RuntimeError(f"Punto inexistente en API: {company} / {machine} / {point}; código={code!r}; disponibles={available}")
+            point_id = point_cache[point_key] = matches[0]["id"]
         return point_id
 
     for (company, month), group in sorted(groups.items()):

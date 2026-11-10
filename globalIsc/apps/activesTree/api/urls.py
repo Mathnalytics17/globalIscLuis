@@ -14,6 +14,7 @@ urlpatterns = [
     path("folders/", FolderViewSet.as_view({"get": "list", "post": "create"}), name="folder-list"),
     path("folders/<int:pk>/", FolderViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="folder-detail"),
     path("machines/", MaquinaViewSet.as_view({"get": "list", "post": "create"}), name="maquina-list"),
+    path("machines/resolve-point-code/", MaquinaViewSet.as_view({"get": "resolve_point_code"}), name="maquina-resolve-point-code"),
     path("machines/<int:pk>/", MaquinaViewSet.as_view({"get": "retrieve", "put": "update", "patch": "partial_update", "delete": "destroy"}), name="maquina-detail"),
     path("machines/<int:pk>/activity/", MaquinaViewSet.as_view({"get": "activity"}), name="maquina-activity"),
     path("machines/<int:pk>/history/", MaquinaViewSet.as_view({"get": "history"}), name="maquina-history"),

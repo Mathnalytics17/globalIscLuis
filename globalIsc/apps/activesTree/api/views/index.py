@@ -126,10 +126,11 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         "reactivate": "maquinas.editar",
         "activity": "maquinas.ver",
         "history": "maquinas.ver",
+        "resolve_point_code": "maquinas.ver",
     }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['empresa', 'nombre', 'tipoAceite', 'numero_serie', 'activo']
-    search_fields = ['nombre', 'codigo_equipo', 'numero_serie']
+    search_fields = ['nombre', 'codigo_equipo', 'numero_serie', 'puntos_muestreo__codigo']
     ordering_fields = ['nombre', 'codigo_equipo', 'numero_serie']
     ordering = ['nombre']
 
@@ -137,6 +138,13 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         queryset = self.queryset.annotate(
             puntos_muestreo_activos_count=Count(
                 'puntos_muestreo', filter=Q(puntos_muestreo__activo=True), distinct=True,
+            ),
+        )
+        queryset = queryset.prefetch_related(
+            Prefetch(
+                'puntos_muestreo',
+                queryset=PuntoMuestreo.objects.filter(activo=True).only('id', 'maquina_id', 'nombre', 'codigo'),
+                to_attr='active_sampling_points',
             ),
         )
         user = self.request.user
@@ -234,6 +242,42 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             return MaquinaConMuestrasSerializer
         return MaquinaSerializer
 
+    @action(detail=False, methods=['get'], url_path='resolve-point-code')
+    def resolve_point_code(self, request):
+        """Find the sampling-point owner from its business code.
+
+        ``codigo_equipo`` belongs to a machine, whereas ``codigo`` belongs to
+        a sampling point.  The UI must not try to infer this relation from a
+        stale paginated machine list: this endpoint resolves it at the source
+        of truth and respects the caller's company scope.
+        """
+        code = (request.query_params.get('code') or '').strip()
+        if not code:
+            return Response({'count': 0, 'results': []})
+
+        visible_machine_ids = self.get_queryset().values('id')
+        points = PuntoMuestreo.objects.filter(
+            activo=True,
+            maquina_id__in=visible_machine_ids,
+        ).filter(
+            Q(codigo__icontains=code) | Q(nombre__icontains=code),
+        ).select_related('maquina', 'maquina__empresa').order_by('codigo', 'id')
+        results = [
+            {
+                'id': point.id,
+                'nombre': point.nombre,
+                'codigo': point.codigo,
+                'maquina': {
+                    'id': point.maquina_id,
+                    'nombre': point.maquina.nombre,
+                    'codigo_equipo': point.maquina.codigo_equipo,
+                    'empresa': point.maquina.empresa_id,
+                },
+            }
+            for point in points
+        ]
+        return Response({'count': len(results), 'results': results})
+
     @staticmethod
     def _audit_snapshot(machine):
         return _asset_snapshot(machine, (
@@ -328,6 +372,21 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         return Response(EventoAuditoriaOperativaSerializer(queryset, many=True).data)
 
     @staticmethod
+    def _history_source_order(sample):
+        """Return the explicit order supplied by a historical ETL row.
+
+        The legacy OA register gives a date but not a time of day.  Its row
+        position is therefore the only source-backed tie breaker for samples
+        taken on the same date.  Normal application samples keep their stable
+        identifier as the fallback order.
+        """
+        raw_value = (sample.campos_adicionales or {}).get("orden_migracion_origen")
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _history_rows(assignment):
         """Aplana el resultado dinámico en filas que se puedan graficar sin
         descargar todas las muestras del equipo al navegador."""
@@ -349,8 +408,10 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "machineName": sample.referencia_equipo.nombre,
             "pointId": str(point.id) if point else "",
             "pointName": point.nombre if point else "Sin punto de medición",
+            "pointCode": point.codigo if point else "",
             "sampleId": sample.id,
             "date": sample.fecha_toma or result.fecha_medicion or result.fecha_registro,
+            "sourceOrder": MaquinaViewSet._history_source_order(sample),
             "testId": str(assignment.prueba_id),
             "testName": f"{assignment.prueba.acronimo} - {assignment.prueba.nombre_variable}",
             "status": assignment.estado_limite or (assignment.evaluacion_limite or {}).get("estado") or "-",
@@ -385,7 +446,10 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='history')
     def history(self, request, pk=None):
-        cached_payload, cache_token = get_related_read_response(request, "history")
+        # v2 adds pointCode to each flattened row.  Keep a separate cache
+        # namespace so a previous response shape cannot make the code filter
+        # look empty until its TTL expires.
+        cached_payload, cache_token = get_related_read_response(request, "history-v2")
         if cached_payload is not None:
             return Response(cached_payload)
         machine = self.get_object()
@@ -409,18 +473,23 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             assignments = assignments.filter(muestra__asignaciones_punto_muestreo__punto_muestreo_id=point_id, muestra__asignaciones_punto_muestreo__activa=True)
         if test_id:
             assignments = assignments.filter(prueba_id=test_id)
-        assignments = assignments.order_by("muestra__fecha_toma", "muestra_id", "id")
+        assignments = list(assignments)
+        # Do not use the generated sample ID as the primary tie breaker for a
+        # migrated date: it reflects import execution, not the Excel source.
+        assignments.sort(key=lambda assignment: (
+            assignment.muestra.fecha_toma,
+            MaquinaViewSet._history_source_order(assignment.muestra) is None,
+            MaquinaViewSet._history_source_order(assignment.muestra) or 0,
+            assignment.muestra_id,
+            assignment.id,
+        ))
         # A page of assignments is not a meaningful page of a time series: a
         # machine with many sampling points can have its first 20 results on
         # the same date, which makes the history chart look like a single-day
         # snapshot.  Return the complete, explicitly filtered history; the
         # client already groups the rows into individual point/result series.
         rows = [row for assignment in assignments for row in self._history_rows(assignment)]
-        page = self.paginate_queryset(rows)
-        if page is not None:
-            response = self.get_paginated_response(page)
-        else:
-            response = Response(rows)
+        response = Response(rows)
         set_related_read_response(response.data, cache_token, timeout=60)
         return response
 

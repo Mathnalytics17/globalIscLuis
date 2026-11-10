@@ -90,9 +90,16 @@ def main():
         machine_ids[(company, machine)] = created["id"]; events.append({"entity": "maquina", "source": f"{company} / {machine}", "id": created["id"]})
     for point in points:
         machine_id = machine_ids[(norm(point["empresa_origen"]), norm(point["maquina_origen"]))]
-        matches = [item for item in api.get("sampling-points/", {"machine": machine_id}) if item.get("codigo") == point["codigo_punto"]]
+        # The approved ETL identity is machine + source PLACA.  Names are
+        # aliases, so they must not create duplicate points when code matches.
+        matches = [item for item in api.get("sampling-points/", {"machine": machine_id}) if (
+            norm(item.get("codigo")) == norm(point["codigo_punto"])
+        )] if point["estado"] == "LISTO_PLACA" else [item for item in api.get("sampling-points/", {"machine": machine_id}) if (
+            norm(item.get("nombre")) == norm(point["nombre_punto"])
+            and norm(item.get("codigo")) == norm(point["codigo_punto"])
+        )]
         created = matches[0] if matches else api.post("sampling-points/", {"maquina": machine_id, "nombre": point["nombre_punto"], "codigo": point["codigo_punto"], "lubricante": ""})
-        events.append({"entity": "punto_muestreo", "source": point["codigo_punto"], "id": created["id"]})
+        events.append({"entity": "punto_muestreo", "source": f'{point["nombre_punto"]} · {point["codigo_punto"]}', "id": created["id"]})
     (args.artifacts / "reports" / "carga_api_activos.json").write_text(json.dumps({"mode": "api", "events": events}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"mode": "apply", "writes": True, "created": len(events)}))
 

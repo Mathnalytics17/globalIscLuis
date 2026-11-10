@@ -49,14 +49,17 @@ MINEROS_ALUVIAL_CANONICAL = "MINEROS ALUVIAL S.A.S."
 
 def client_identity(value: Any) -> str:
     """Compare company names without legal-format punctuation or casing noise."""
-    return re.sub(r"[^A-Z0-9]+", " ", value_as_text(value).upper()).strip()
+    # ``S.A.S.`` and ``SAS`` are the same legal suffix.  Removing separators
+    # avoids treating ``MINEROS ALUVIAL S.A.S.`` and ``MINEROS ALUVIAL SAS``
+    # as different clients during a scoped historical import.
+    return re.sub(r"[^A-Z0-9]+", "", value_as_text(value).upper())
 
 
 def apply_client_scope(rows: list[dict[str, Any]], scope: str) -> list[dict[str, Any]]:
     """Keep the requested client set and collapse known Mineros Aluvial aliases."""
     if scope == "all":
         return rows
-    accepted = {"MINEROS ALUVIAL SAS", "MINEROS ALUVIAL SAS BIC"}
+    accepted = {"MINEROSALUVIALSAS", "MINEROSALUVIALSASBIC"}
     selected = []
     for row in rows:
         if client_identity(row.get("CLIENTE")) not in accepted:
