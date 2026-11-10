@@ -92,9 +92,13 @@ def main():
         machine_id = machine_ids[(norm(point["empresa_origen"]), norm(point["maquina_origen"]))]
         # The approved ETL identity is machine + source PLACA.  Names are
         # aliases, so they must not create duplicate points when code matches.
-        matches = [item for item in api.get("sampling-points/", {"machine": machine_id}) if (
+        # The API paginates to 20 rows by default.  A machine may have more
+        # than 20 points, so a first-page lookup would attempt a duplicate
+        # POST and leave a partial migration.
+        machine_points = api.get("sampling-points/", {"machine": machine_id, "page_size": 1000})
+        matches = [item for item in machine_points if (
             norm(item.get("codigo")) == norm(point["codigo_punto"])
-        )] if point["estado"] == "LISTO_PLACA" else [item for item in api.get("sampling-points/", {"machine": machine_id}) if (
+        )] if point["estado"] == "LISTO_PLACA" else [item for item in machine_points if (
             norm(item.get("nombre")) == norm(point["nombre_punto"])
             and norm(item.get("codigo")) == norm(point["codigo_punto"])
         )]

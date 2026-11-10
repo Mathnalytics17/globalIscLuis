@@ -239,11 +239,14 @@ def main():
         point_key = (machine_id, "placa", code) if sourced_by_plate else (machine_id, "nombre", point, code)
         point_id = point_cache.get(point_key)
         if point_id is None:
-            matches = [item for item in api.get("sampling-points/", {"machine": machine_id}) if norm(item.get("codigo")) == code] if sourced_by_plate else [item for item in api.get("sampling-points/", {"machine": machine_id}) if (
+            # Do not assume the first API page contains the requested point:
+            # dredges commonly have more than the default 20 points.
+            machine_points = api.get("sampling-points/", {"machine": machine_id, "page_size": 1000})
+            matches = [item for item in machine_points if norm(item.get("codigo")) == code] if sourced_by_plate else [item for item in machine_points if (
                 norm(item.get("nombre")) == point_spec["nombre"] and norm(item.get("codigo")) == code
             )]
             if not matches:
-                available = [(norm(item.get("nombre")), norm(item.get("codigo"))) for item in api.get("sampling-points/", {"machine": machine_id})]
+                available = [(norm(item.get("nombre")), norm(item.get("codigo"))) for item in machine_points]
                 raise RuntimeError(f"Punto inexistente en API: {company} / {machine} / {point}; código={code!r}; disponibles={available}")
             point_id = point_cache[point_key] = matches[0]["id"]
         return point_id
