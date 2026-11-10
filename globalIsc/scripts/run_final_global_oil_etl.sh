@@ -3,7 +3,8 @@
 # The caller must first copy both workbooks to paths visible in this container.
 set -euo pipefail
 
-REPORTES="/tmp/REGISTRO_OA.xlsx"
+REPORTES=("/tmp/REGISTRO_OA.xlsx")
+REPORTES_EXPLICIT=false
 CONOCIMIENTO="/tmp/Base_Conocimiento_Aceites_v9.xlsx"
 BASE_URL="http://localhost:8000"
 EMAIL=""
@@ -17,7 +18,7 @@ Usage:
   run_final_global_oil_etl.sh --apply --email EMAIL [options]
 
 Options:
-  --reportes PATH          Workbook REGISTRO OA inside the container.
+  --reportes PATH          Workbook OA inside the container. Repeat for each delivery.
   --conocimiento PATH      Workbook Base de Conocimiento inside the container.
   --base-url URL           URL served by this same deployment.
   --email EMAIL            Existing administrator email for the API.
@@ -29,7 +30,9 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --reportes) REPORTES="$2"; shift 2 ;;
+    --reportes)
+      if [[ "$REPORTES_EXPLICIT" == false ]]; then REPORTES=(); REPORTES_EXPLICIT=true; fi
+      REPORTES+=("$2"); shift 2 ;;
     --conocimiento) CONOCIMIENTO="$2"; shift 2 ;;
     --base-url) BASE_URL="$2"; shift 2 ;;
     --email) EMAIL="$2"; shift 2 ;;
@@ -43,7 +46,9 @@ done
 
 [[ "$APPLY" == true ]] || { echo "Use --apply para una carga real." >&2; exit 2; }
 [[ -n "$EMAIL" ]] || { echo "Falta --email." >&2; exit 2; }
-[[ -f "$REPORTES" ]] || { echo "No existe el Excel de reportes: $REPORTES" >&2; exit 2; }
+for report in "${REPORTES[@]}"; do
+  [[ -f "$report" ]] || { echo "No existe el Excel de reportes: $report" >&2; exit 2; }
+done
 [[ -f "$CONOCIMIENTO" ]] || { echo "No existe el Excel de conocimiento: $CONOCIMIENTO" >&2; exit 2; }
 
 PASSWORD="${!PASSWORD_ENV:-}"
@@ -56,7 +61,9 @@ COMMON=(--artifacts "$ARTIFACTS" --base-url "$BASE_URL")
 
 run() { python "$@"; }
 
-run scripts/etl_historica_global_oil.py --reportes "$REPORTES" --conocimiento "$CONOCIMIENTO" --output "$ARTIFACTS" --replace --client-scope "$CLIENT_SCOPE"
+REPORT_ARGS=()
+for report in "${REPORTES[@]}"; do REPORT_ARGS+=(--reportes "$report"); done
+run scripts/etl_historica_global_oil.py "${REPORT_ARGS[@]}" --conocimiento "$CONOCIMIENTO" --output "$ARTIFACTS" --replace --client-scope "$CLIENT_SCOPE"
 run scripts/etl_global_oil_domain.py --artifacts "$ARTIFACTS"
 run scripts/build_technical_configuration_proposal.py --artifacts "$ARTIFACTS"
 run scripts/build_api_result_payloads.py --artifacts "$ARTIFACTS"
