@@ -9,6 +9,7 @@ ENV PYTHONPATH=/usr/src/globalIsc
 
 # Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
     build-essential \
     libpq-dev \
     postgresql-client \
