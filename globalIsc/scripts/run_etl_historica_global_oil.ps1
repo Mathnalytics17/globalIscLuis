@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$Reportes = "C:\Users\Usuario\Downloads\REPORTES 2026 CORTO 20 SEPTIMBRE.xlsx",
+    [string[]]$Reportes = @(
+        "C:\Users\Usuario\Downloads\REGISTRO OA.xlsx",
+        "C:\Users\Usuario\Downloads\REPORTES 2026 CORTO 20 SEPTIMBRE (1).xlsx"
+    ),
     [string]$Conocimiento = "C:\Users\Usuario\Downloads\Base_Conocimiento_Aceites_v9.xlsx",
     [string]$Output = "",
     [switch]$Replace
@@ -19,7 +22,9 @@ if (-not (Test-Path -LiteralPath $Conocimiento -PathType Leaf)) {
     throw "No se encontró el Excel de conocimiento: $Conocimiento"
 }
 
-$arguments = @($etlScript, "--reportes", $Reportes, "--conocimiento", $Conocimiento, "--output", $Output)
+$arguments = @($etlScript)
+foreach ($report in $Reportes) { $arguments += @("--reportes", $report) }
+$arguments += @("--conocimiento", $Conocimiento, "--output", $Output)
 if ($Replace) { $arguments += "--replace" }
 
 & python @arguments

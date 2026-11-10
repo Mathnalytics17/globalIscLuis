@@ -86,6 +86,25 @@ class HistoricEtlTest(unittest.TestCase):
 
             self.assertEqual(manifest["controls"]["records"], 1)
 
+    def test_keeps_reused_oa_numbers_from_two_workbooks_as_distinct_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first, second = root / "registro oa.xlsx", root / "reportes 2026.xlsx"
+            knowledge, output = root / "conocimiento.xlsx", root / "output"
+            headers = list(dict.fromkeys([*SAMPLE_COLUMNS, "APARIENCIA", "Ag", "Zn", "CONCLUSIÓN"]))
+            for report, sheet_name, client in ((first, "Dump OA", "Cliente histórico"), (second, "Reporte OA", "Cliente 2026")):
+                workbook = Workbook(); sheet = workbook.active; sheet.title = sheet_name
+                sheet.append([""] * len(headers)); sheet.append(headers)
+                values = {column: "" for column in headers}
+                values.update({"OA": "679", "FECHA": datetime(2026, 1, 2), "FECHA TOMA DE MUESTRA": datetime(2026, 1, 1), "CLIENTE": client, "EQUIPO": "Equipo 1", "PLACA": "ABC123", "LUBRICANTE": "Aceite 46", "Tipo": "Hidraulico", "Viscosidad": "ISO 46", "Esp_Cal": "HM", "Responsable": "Analista", "APARIENCIA": "CLARA", "Zn": 10})
+                sheet.append([values[column] for column in headers]); workbook.save(report)
+            knowledge_book = Workbook(); knowledge_book.save(knowledge)
+            manifest = make_artifacts([first, second], knowledge, output, replace=False, client_scope="all")
+            self.assertEqual(manifest["controls"]["records"], 2)
+            raw = [json.loads(line) for line in (output / "staging" / "reportes_oa_raw.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual({row["data"]["OA_ORIGINAL"] for row in raw}, {"679"})
+            self.assertEqual(len({row["data"]["OA"] for row in raw}), 2)
+
     def test_mineros_scope_keeps_sas_and_sas_bic_legal_spellings(self):
         rows = [
             {"CLIENTE": "MINEROS ALUVIAL S.A.S.", "OA": "old"},

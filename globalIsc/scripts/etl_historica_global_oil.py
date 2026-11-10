@@ -143,31 +143,65 @@ def normalized_label(value: str) -> str:
     return " ".join(value.split()).upper()
 
 
-def load_report_rows(path: Path) -> tuple[list[str], list[dict[str, Any]]]:
+def source_identifier(path: Path, used: set[str]) -> str:
+    """Return a readable, deterministic identifier for one source workbook."""
+    base = safe_name(path.stem).upper()
+    candidate = base
+    sequence = 2
+    while candidate in used:
+        candidate = f"{base}_{sequence}"
+        sequence += 1
+    used.add(candidate)
+    return candidate
+
+
+def load_report_rows(paths: Iterable[Path]) -> tuple[list[str], list[dict[str, Any]], list[dict[str, str]]]:
     # The source has a helper formula.  The ETL consumes displayed source values,
     # never formulas, so cached values avoid formula translation/cycle handling.
-    workbook = load_workbook(path, read_only=True, data_only=True)
-    sheet_name = next((name for name in REPORT_SHEETS if name in workbook.sheetnames), None)
-    if sheet_name is None:
-        allowed = ", ".join(repr(name) for name in REPORT_SHEETS)
-        raise ValueError(f"No existe una hoja OA compatible ({allowed}) en {path.name}")
-    sheet = workbook[sheet_name]
-    headers = [value_as_text(cell.value) for cell in next(sheet.iter_rows(min_row=2, max_row=2))]
-    if len(headers) != len(set(headers)):
-        duplicates = [name for name, count in Counter(headers).items() if count > 1]
-        raise ValueError(f"Encabezados duplicados no soportados: {duplicates}")
-    header_index(headers, "OA")
-    for column in MASTER_COLUMNS.values():
-        header_index(headers, column)
+    canonical_headers: list[str] | None = None
     rows: list[dict[str, Any]] = []
-    for source_row, values in enumerate(sheet.iter_rows(min_row=3, values_only=True), start=3):
-        record = {header: json_value(value) for header, value in zip(headers, values)}
-        if not value_as_text(record.get("OA")):
-            continue
-        record["_source_row"] = source_row
-        rows.append(record)
-    workbook.close()
-    return headers, rows
+    sources: list[dict[str, str]] = []
+    used_source_ids: set[str] = set()
+    global_source_order = 0
+    for path in paths:
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        sheet_name = next((name for name in REPORT_SHEETS if name in workbook.sheetnames), None)
+        if sheet_name is None:
+            allowed = ", ".join(repr(name) for name in REPORT_SHEETS)
+            raise ValueError(f"No existe una hoja OA compatible ({allowed}) en {path.name}")
+        sheet = workbook[sheet_name]
+        headers = [value_as_text(cell.value) for cell in next(sheet.iter_rows(min_row=2, max_row=2))]
+        if len(headers) != len(set(headers)):
+            duplicates = [name for name, count in Counter(headers).items() if count > 1]
+            raise ValueError(f"Encabezados duplicados no soportados en {path.name}: {duplicates}")
+        header_index(headers, "OA")
+        for column in MASTER_COLUMNS.values():
+            header_index(headers, column)
+        if canonical_headers is None:
+            canonical_headers = headers
+        elif headers != canonical_headers:
+            raise ValueError(f"El contrato de columnas de {path.name} no coincide con el primer Excel de reportes.")
+        source_id = source_identifier(path, used_source_ids)
+        sources.append({"source_id": source_id, "path": str(path.resolve()), "sheet": sheet_name, "sha256": sha256(path)})
+        for source_row, values in enumerate(sheet.iter_rows(min_row=3, values_only=True), start=3):
+            record = {header: json_value(value) for header, value in zip(headers, values)}
+            original_oa = value_as_text(record.get("OA"))
+            if not original_oa:
+                continue
+            global_source_order += 1
+            # OA is only unique inside each legacy export.  Every downstream
+            # artifact historically uses this key, so namespace it here and
+            # preserve the value printed by the laboratory in OA_ORIGINAL.
+            record["OA_ORIGINAL"] = original_oa
+            record["OA"] = f"{source_id}:{original_oa}"
+            record["_source_id"] = source_id
+            record["_source_row"] = source_row
+            record["_source_order"] = global_source_order
+            rows.append(record)
+        workbook.close()
+    if canonical_headers is None:
+        raise ValueError("No se recibió ningún Excel de reportes.")
+    return canonical_headers, rows, sources
 
 
 def extract_knowledge(path: Path, destination: Path) -> dict[str, int]:
@@ -227,14 +261,17 @@ def create_homologation(rows: list[dict[str, Any]], headers: list[str], destinat
     return counts
 
 
-def make_artifacts(report_path: Path, knowledge_path: Path, output: Path, replace: bool, client_scope: str) -> dict[str, Any]:
+def make_artifacts(report_paths: Path | Iterable[Path], knowledge_path: Path, output: Path, replace: bool, client_scope: str) -> dict[str, Any]:
     if output.exists() and any(output.iterdir()):
         if not replace:
             raise FileExistsError(f"La salida ya existe y no está vacía: {output}. Use --replace para regenerarla.")
         shutil.rmtree(output)
     output.mkdir(parents=True, exist_ok=True)
 
-    headers, rows = load_report_rows(report_path)
+    if isinstance(report_paths, Path):
+        report_paths = [report_paths]
+    report_paths = list(report_paths)
+    headers, rows, report_sources = load_report_rows(report_paths)
     source_record_count = len(rows)
     rows = apply_client_scope(rows, client_scope)
     oa_counts = Counter(value_as_text(row["OA"]) for row in rows)
@@ -262,7 +299,10 @@ def make_artifacts(report_path: Path, knowledge_path: Path, output: Path, replac
                 warnings.append({"oa": oa, "source_row": str(row["_source_row"]), "type": "FECHA_FUTURA", "detail": f"{date_column}: {date_value.isoformat()}"})
         samples.append({
             "oa": oa,
+            "oa_original": value_as_text(row.get("OA_ORIGINAL")),
+            "source_id": value_as_text(row.get("_source_id")),
             "source_row": row["_source_row"],
+            "source_order": row["_source_order"],
             **{safe_name(column): value_as_text(row.get(column)) for column in SAMPLE_COLUMNS},
         })
         for index in range(first, last + 1):
@@ -272,6 +312,8 @@ def make_artifacts(report_path: Path, knowledge_path: Path, output: Path, replac
                 continue
             measurements.append({
                 "oa": oa,
+                "oa_original": value_as_text(row.get("OA_ORIGINAL")),
+                "source_id": value_as_text(row.get("_source_id")),
                 "source_row": row["_source_row"],
                 "family": "metal" if index >= metal_start else "fisico_quimico",
                 "source_column": source_column,
@@ -282,15 +324,22 @@ def make_artifacts(report_path: Path, knowledge_path: Path, output: Path, replac
             })
         interpretations.append({
             "oa": oa,
+            "oa_original": value_as_text(row.get("OA_ORIGINAL")),
+            "source_id": value_as_text(row.get("_source_id")),
             "source_row": row["_source_row"],
             "conclusion": value_as_text(row.get("CONCLUSIÓN")),
             "comments": {column: value_as_text(row.get(column)) for column in comment_columns if value_as_text(row.get(column))},
         })
 
-    raw_rows = [{"source_row": row["_source_row"], "data": {key: value for key, value in row.items() if key != "_source_row"}} for row in rows]
+    raw_rows = [{
+        "source_id": row["_source_id"],
+        "source_row": row["_source_row"],
+        "source_order": row["_source_order"],
+        "data": {key: value for key, value in row.items() if key not in {"_source_id", "_source_row", "_source_order"}},
+    } for row in rows]
     write_jsonl(output / "staging" / "reportes_oa_raw.jsonl", raw_rows)
-    write_csv(output / "staging" / "muestras.csv", samples, ["oa", "source_row"] + [safe_name(column) for column in SAMPLE_COLUMNS])
-    write_csv(output / "staging" / "mediciones.csv", measurements, ["oa", "source_row", "family", "source_column", "original_value", "comparator", "numeric_value", "unit"])
+    write_csv(output / "staging" / "muestras.csv", samples, ["oa", "oa_original", "source_id", "source_row", "source_order"] + [safe_name(column) for column in SAMPLE_COLUMNS])
+    write_csv(output / "staging" / "mediciones.csv", measurements, ["oa", "oa_original", "source_id", "source_row", "family", "source_column", "original_value", "comparator", "numeric_value", "unit"])
     write_jsonl(output / "staging" / "interpretaciones.jsonl", interpretations)
     write_csv(output / "qa" / "duplicados_oa.csv", [{"oa": oa, "occurrences": oa_counts[oa]} for oa in duplicate_oa], ["oa", "occurrences"])
     write_csv(output / "qa" / "advertencias.csv", warnings, ["oa", "source_row", "type", "detail"])
@@ -305,7 +354,7 @@ def make_artifacts(report_path: Path, knowledge_path: Path, output: Path, replac
         "client_aliases_collapsed": {"MINEROS ALUVIAL SAS BIC": MINEROS_ALUVIAL_CANONICAL} if client_scope == "mineros" else {},
         "database_written": False,
         "sources": {
-            "reportes": {"path": str(report_path.resolve()), "sha256": sha256(report_path)},
+            "reportes": report_sources,
             "conocimiento": {"path": str(knowledge_path.resolve()), "sha256": sha256(knowledge_path)},
         },
         "controls": {
@@ -346,13 +395,13 @@ def make_artifacts(report_path: Path, knowledge_path: Path, output: Path, replac
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Extrae y prepara la migración histórica Global Oil sin tocar la base de datos.")
-    parser.add_argument("--reportes", type=Path, required=True, help="Excel histórico: REPORTES ...xlsx")
+    parser.add_argument("--reportes", type=Path, required=True, action="append", help="Excel histórico OA. Repita --reportes para combinar varias entregas sin colisiones de OA.")
     parser.add_argument("--conocimiento", type=Path, required=True, help="Excel técnico: Base_Conocimiento ...xlsx")
     parser.add_argument("--output", type=Path, required=True, help="Directorio de artefactos físicos")
     parser.add_argument("--replace", action="store_true", help="Reemplaza completamente el directorio de salida indicado")
     parser.add_argument("--client-scope", choices=("all", "mineros"), default="all", help="all carga todos los clientes; mineros conserva y unifica solo Mineros Aluvial S.A.S. y su variante BIC.")
     args = parser.parse_args()
-    for source in (args.reportes, args.conocimiento):
+    for source in [*args.reportes, args.conocimiento]:
         if not source.is_file():
             parser.error(f"No existe el archivo fuente: {source}")
     try:

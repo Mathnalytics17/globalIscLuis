@@ -8,10 +8,16 @@ Desde `backend\globalIsc`:
 
 ```powershell
 python scripts/etl_historica_global_oil.py `
-  --reportes "C:\Users\Usuario\Downloads\REPORTES 2026 CORTO 20 SEPTIMBRE.xlsx" `
+  --reportes "C:\Users\Usuario\Downloads\REGISTRO OA.xlsx" `
+  --reportes "C:\Users\Usuario\Downloads\REPORTES 2026 CORTO 20 SEPTIMBRE (1).xlsx" `
   --conocimiento "C:\Users\Usuario\Downloads\Base_Conocimiento_Aceites_v9.xlsx" `
   --output "outputs\migracion_historica_global_oil" --replace
 ```
+
+`--reportes` se puede repetir. Cada archivo queda identificado en los
+artefactos y la clave de migración es `archivo:OA`; así, una OA reutilizada en
+dos entregas no sobrescribe ni omite una muestra. El valor original sigue
+guardado como `OA_ORIGINAL` y en los campos adicionales de la muestra.
 
 También puede ejecutar desde `backend\globalIsc\scripts`:
 

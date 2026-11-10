@@ -8,7 +8,10 @@ only: hidden from the customer and never approved or emailed.
 #>
 [CmdletBinding()]
 param(
-    [string]$Reportes = "C:\Users\Usuario\Downloads\REPORTES 2026 CORTO 20 SEPTIMBRE (1).xlsx",
+    [string[]]$Reportes = @(
+        "C:\Users\Usuario\Downloads\REGISTRO OA.xlsx",
+        "C:\Users\Usuario\Downloads\REPORTES 2026 CORTO 20 SEPTIMBRE (1).xlsx"
+    ),
     [string]$Conocimiento = "C:\Users\Usuario\Downloads\Base_Conocimiento_Aceites_v9 (1).xlsx",
     [string]$Email = "admin@globaloil.local",
     [string]$Password,
@@ -68,7 +71,9 @@ try {
         } finally { Pop-Location }
     }
 
-    Invoke-EtlPython scripts\etl_historica_global_oil.py --reportes $Reportes --conocimiento $Conocimiento --output $artifacts --replace --client-scope $ClientScope
+    $reportArguments = @()
+    foreach ($report in $Reportes) { $reportArguments += @("--reportes", $report) }
+    Invoke-EtlPython scripts\etl_historica_global_oil.py @reportArguments --conocimiento $Conocimiento --output $artifacts --replace --client-scope $ClientScope
     Invoke-EtlPython scripts\etl_global_oil_domain.py --artifacts $artifacts
     Invoke-EtlPython scripts\build_technical_configuration_proposal.py --artifacts $artifacts
     Invoke-EtlPython scripts\build_api_result_payloads.py --artifacts $artifacts

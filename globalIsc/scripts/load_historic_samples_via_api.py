@@ -26,7 +26,8 @@ def rows(path):
         row = dict(record["data"])
         # This is provenance, not a fabricated timestamp.  It resolves only
         # equal sampling dates in the historical trend view.
-        row["_orden_migracion_origen"] = record.get("source_row")
+        row["_orden_migracion_origen"] = record.get("source_order", record.get("source_row"))
+        row["_source_id"] = record.get("source_id")
         source.append(row)
     return source
 
@@ -113,7 +114,11 @@ def sample_payload(row, point_id, atributos_tecnicos):
         "observaciones": norm(row.get("Observacion")) or None,
         "atributos_tecnicos": atributos_tecnicos,
         "campos_adicionales": {
+            # OA is namespaced by source workbook in the ETL because several
+            # yearly exports reuse the same laboratory OA numbering.
             "oa_origen": str(row.get("OA") or "").strip(),
+            "oa_original": str(row.get("OA_ORIGINAL") or row.get("OA") or "").strip(),
+            "archivo_origen": str(row.get("_source_id") or "").strip(),
             "orden_migracion_origen": row.get("_orden_migracion_origen"),
             "fecha_reporte_origen": as_date(row.get("FECHA")),
             "tipo_sistema_origen": norm(row.get("Tipo")),
