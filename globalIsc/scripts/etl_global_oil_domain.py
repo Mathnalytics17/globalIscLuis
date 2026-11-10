@@ -164,7 +164,15 @@ def build_point_rows(rows):
     # the original source name remains in ``punto_origen``.
     by_visible_name = defaultdict(list)
     for point in point_rows:
-        by_visible_name[(point["empresa_origen"], point["maquina_origen"], point["nombre_punto"])].append(point)
+        # PostgreSQL enforces the point name as case-insensitive per machine.
+        # The ETL must use that same identity, otherwise source variants such
+        # as `Reductor proa der` / `REDUCTOR PROA DER` collide only after part
+        # of the API load has already completed.
+        by_visible_name[(
+            point["empresa_origen"].casefold(),
+            point["maquina_origen"].casefold(),
+            norm(point["nombre_punto"]).casefold(),
+        )].append(point)
     for duplicates in by_visible_name.values():
         if len(duplicates) > 1:
             for point in duplicates:
