@@ -19,7 +19,9 @@ param(
     [switch]$Apply,
     [switch]$ResetLocal,
     [switch]$SkipFinalVerification,
-    [string]$BaseUrl = "http://localhost:8001"
+    # `web` is the local API container and is published on 8000. Daphne is
+    # a separate ASGI service on 8002.
+    [string]$BaseUrl = "http://localhost:8000"
 )
 
 $ErrorActionPreference = "Stop"
