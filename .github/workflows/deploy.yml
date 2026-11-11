@@ -16,68 +16,57 @@ concurrency:
 jobs:
     deploy:
         name: deploy-production
-
-        if: ${{ github.event.workflow_run.conclusion == 'success' }}
-
+        if: >-
+            github.event.workflow_run.conclusion == 'success' &&
+            github.event.workflow_run.event == 'push'
         runs-on: ubuntu-latest
         environment: production
 
         steps:
-            - name: Deploy backend
+            steps:
+                - name: Connect to Tailscale
+                  uses: tailscale/github-action@v4
+                  with:
+                      oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+                      oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+                      tags: tag:ci
+
+                - name: Verify SSH connectivity
+                  run: |
+                      timeout 15 bash -c 'echo > /dev/tcp/100.120.11.53/22'
+                      echo "SSH de Fedora accesible"
+
+                - name: Deploy frontend to this server
               uses: appleboy/ssh-action@v1.2.5
               with:
                   host: ${{ secrets.SSH_HOST }}
                   username: ${{ secrets.SSH_USER }}
                   key: ${{ secrets.SSH_PRIVATE_KEY }}
                   port: ${{ secrets.SSH_PORT }}
-
                   script: |
-                      set -e
-
-                      cd /root/globalOil/backend
-
+                      set -eu
+                      cd /home/luismolina/servidor/apps/globaloil/backend
                       git fetch origin master
                       git switch master
-                      git reset --hard origin/master
+                      git pull --ff-only origin master
 
-                      # Recreate only this project's application services and
-                      # remove containers left by retired Compose services.
-                      docker compose -f docker-compose.prod.yml up -d --build --force-recreate --remove-orphans web daphne
+                      docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml up -d --build --force-recreate web daphne
 
-                      docker compose -f docker-compose.prod.yml restart nginx
-
-                      echo "Waiting for backend health check..."
-
-                      for i in $(seq 1 20); do
-                        if docker compose -f docker-compose.prod.yml exec -T web \
-                          python -c "import urllib.request; req=urllib.request.Request('http://127.0.0.1:8000/api/health/', headers={'Host':'muestraslubricantesglobal.com','X-Forwarded-Proto':'https'}); r=urllib.request.urlopen(req, timeout=5); print(r.read().decode()); assert r.status == 200"; then
-
-                          echo "Backend is healthy."
+                      healthy=""
+                      for attempt in $(seq 1 20); do
+                        if docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml exec -T web python -c "import urllib.request; req=urllib.request.Request('http://127.0.0.1:8000/api/health/', headers={'Host':'globaloil.luismolinatest.com','X-Forwarded-Proto':'https'}); r=urllib.request.urlopen(req, timeout=5); print(r.read().decode()); assert r.status == 200"; then
+                          healthy="yes"
                           break
                         fi
-
-                        if [ "$i" -eq 20 ]; then
-                          echo "Backend health check failed."
-                          docker compose -f docker-compose.prod.yml logs --tail=100 web
-                          exit 1
-                        fi
-
-                        echo "Attempt $i/20 failed. Retrying in 3 seconds..."
+                        echo "Intento ${attempt}/20 falló; reintentando en 3 segundos..."
                         sleep 3
                       done
 
-                      docker compose -f docker-compose.prod.yml ps
+                      if [ -z "$healthy" ]; then
+                        echo "La comprobación de salud del backend falló."
+                        docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml logs --tail=100 web
+                        exit 1
+                      fi
 
-                      # Keep the Docker host bounded without ever pruning volumes.
-                      # postgres_data, redis_data and /apps/media are persistent
-                      # application data and are deliberately not touched here.
-                      # Retaining seven days allows quick rollbacks while removing
-                      # obsolete images and BuildKit cache from old deployments.
-                      retention="${DOCKER_PRUNE_UNTIL:-168h}"
-                      echo "Docker usage before cleanup:"
-                      docker system df || true
-                      docker container prune --force --filter "until=${retention}" || true
-                      docker image prune --all --force --filter "until=${retention}" || true
-                      docker builder prune --all --force --filter "until=${retention}" || true
-                      echo "Docker usage after cleanup:"
-                      docker system df || true
+                      docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml ps web daphne
+                      docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml logs --tail=50 web daphne || true
