@@ -1,72 +1,72 @@
 name: Backend Deploy
 
 on:
-    workflow_run:
-        workflows:
-            - Backend CI
-        types:
-            - completed
-        branches:
-            - master
+  workflow_run:
+    workflows:
+      - Backend CI
+    types:
+      - completed
+    branches:
+      - master
 
 concurrency:
-    group: backend-production
-    cancel-in-progress: false
+  group: backend-production
+  cancel-in-progress: false
 
 jobs:
-    deploy:
-        name: deploy-production
-        if: >-
-            github.event.workflow_run.conclusion == 'success' &&
-            github.event.workflow_run.event == 'push'
-        runs-on: ubuntu-latest
-        environment: production
+  deploy:
+    name: deploy-production
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    environment: production
 
-        steps:
-            steps:
-                - name: Connect to Tailscale
-                  uses: tailscale/github-action@v4
-                  with:
-                      oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-                      oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-                      tags: tag:ci
+    steps:
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: 100.120.11.53
 
-                - name: Verify SSH connectivity
-                  run: |
-                      timeout 15 bash -c 'echo > /dev/tcp/100.120.11.53/22'
-                      echo "SSH de Fedora accesible"
+      - name: Verify SSH connectivity
+        run: |
+          timeout 30 bash -c 'echo > /dev/tcp/100.120.11.53/22'
+          echo "SSH de Fedora accesible"
 
-                - name: Deploy frontend to this server
-              uses: appleboy/ssh-action@v1.2.5
-              with:
-                  host: ${{ secrets.SSH_HOST }}
-                  username: ${{ secrets.SSH_USER }}
-                  key: ${{ secrets.SSH_PRIVATE_KEY }}
-                  port: ${{ secrets.SSH_PORT }}
-                  script: |
-                      set -eu
-                      cd /home/luismolina/servidor/apps/globaloil/backend
-                      git fetch origin master
-                      git switch master
-                      git pull --ff-only origin master
+      - name: Deploy backend to this server
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            set -eu
+            cd /home/luismolina/servidor/apps/globaloil/backend
+            git fetch origin master
+            git switch master
+            git pull --ff-only origin master
 
-                      docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml up -d --build --force-recreate web daphne
+            docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml up -d --build --force-recreate web daphne
 
-                      healthy=""
-                      for attempt in $(seq 1 20); do
-                        if docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml exec -T web python -c "import urllib.request; req=urllib.request.Request('http://127.0.0.1:8000/api/health/', headers={'Host':'globaloil.luismolinatest.com','X-Forwarded-Proto':'https'}); r=urllib.request.urlopen(req, timeout=5); print(r.read().decode()); assert r.status == 200"; then
-                          healthy="yes"
-                          break
-                        fi
-                        echo "Intento ${attempt}/20 falló; reintentando en 3 segundos..."
-                        sleep 3
-                      done
+            healthy=""
+            for attempt in $(seq 1 20); do
+              if docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml exec -T web python -c "import urllib.request; req=urllib.request.Request('http://127.0.0.1:8000/api/health/', headers={'Host':'globaloil.luismolinatest.com','X-Forwarded-Proto':'https'}); r=urllib.request.urlopen(req, timeout=5); print(r.read().decode()); assert r.status == 200"; then
+                healthy="yes"
+                break
+              fi
+              echo "Intento ${attempt}/20 falló; reintentando en 3 segundos..."
+              sleep 3
+            done
 
-                      if [ -z "$healthy" ]; then
-                        echo "La comprobación de salud del backend falló."
-                        docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml logs --tail=100 web
-                        exit 1
-                      fi
+            if [ -z "$healthy" ]; then
+              echo "La comprobación de salud del backend falló."
+              docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml logs --tail=100 web
+              exit 1
+            fi
 
-                      docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml ps web daphne
-                      docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml logs --tail=50 web daphne || true
+            docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml ps web daphne
+            docker compose -p globaloil-home -f docker-compose.prod.yml -f docker-compose.home.yml logs --tail=50 web daphne || true
