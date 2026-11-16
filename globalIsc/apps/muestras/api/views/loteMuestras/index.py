@@ -211,8 +211,12 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         tipo_cliente = self.request.query_params.get("tipo_cliente")
         estado = self.request.query_params.get("estado")
         tipo_gestion = self.request.query_params.get("tipo_gestion")
-        fecha_desde = self.request.query_params.get("fecha_desde")
-        fecha_hasta = self.request.query_params.get("fecha_hasta")
+        # A lot is a container and can have a reception/sending date that is
+        # different from the historical sample date.  Date filters in this
+        # workspace must therefore operate on the actual sampling date.
+        # Keep the legacy parameter names as a backwards-compatible alias.
+        fecha_toma_desde = self.request.query_params.get("fecha_toma_desde") or self.request.query_params.get("fecha_desde")
+        fecha_toma_hasta = self.request.query_params.get("fecha_toma_hasta") or self.request.query_params.get("fecha_hasta")
         search = self.request.query_params.get("search")
         machine_id = self.request.query_params.get("machine_id")
         sampling_point_id = self.request.query_params.get("sampling_point_id")
@@ -229,11 +233,11 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
         if tipo_gestion and tipo_gestion != "todos":
             queryset = queryset.filter(tipo_gestion_id=tipo_gestion)
 
-        if fecha_desde:
-            queryset = queryset.filter(fecha_envio__gte=fecha_desde)
+        if fecha_toma_desde:
+            queryset = queryset.filter(muestras__fecha_toma__date__gte=fecha_toma_desde)
 
-        if fecha_hasta:
-            queryset = queryset.filter(fecha_envio__lte=fecha_hasta)
+        if fecha_toma_hasta:
+            queryset = queryset.filter(muestras__fecha_toma__date__lte=fecha_toma_hasta)
 
         if search:
             queryset = queryset.filter(
@@ -245,6 +249,7 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 | Q(muestras__referencia_equipo__codigo_equipo__icontains=search)
                 | Q(muestras__equipo_placa__icontains=search)
                 | Q(muestras__asignaciones_punto_muestreo__punto_muestreo__nombre__icontains=search)
+                | Q(muestras__asignaciones_punto_muestreo__punto_muestreo__codigo__icontains=search)
             ).distinct()
 
         match_filter = Q()
@@ -412,6 +417,8 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             search = str(request.query_params.get("search") or "").strip()
             machine_id = request.query_params.get("machine_id")
             sampling_point_id = request.query_params.get("sampling_point_id")
+            fecha_toma_desde = request.query_params.get("fecha_toma_desde")
+            fecha_toma_hasta = request.query_params.get("fecha_toma_hasta")
             if search:
                 queryset = queryset.filter(
                     Q(id__icontains=search)
@@ -419,6 +426,7 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                     | Q(referencia_equipo__codigo_equipo__icontains=search)
                     | Q(equipo_placa__icontains=search)
                     | Q(asignaciones_punto_muestreo__punto_muestreo__nombre__icontains=search)
+                    | Q(asignaciones_punto_muestreo__punto_muestreo__codigo__icontains=search)
                 ).distinct()
             if machine_id:
                 queryset = queryset.filter(referencia_equipo_id=machine_id)
@@ -427,6 +435,10 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                     asignaciones_punto_muestreo__punto_muestreo_id=sampling_point_id,
                     asignaciones_punto_muestreo__activa=True,
                 )
+            if fecha_toma_desde:
+                queryset = queryset.filter(fecha_toma__date__gte=fecha_toma_desde)
+            if fecha_toma_hasta:
+                queryset = queryset.filter(fecha_toma__date__lte=fecha_toma_hasta)
 
             page = self.paginate_queryset(queryset)
             serializer = LoteMuestraWorkspaceSerializer(

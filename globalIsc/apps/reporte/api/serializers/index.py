@@ -78,6 +78,9 @@ class ReporteSummarySerializer(serializers.ModelSerializer):
     ultima_version = serializers.IntegerField(
         source="ultima_version_value", read_only=True
     )
+    punto_muestreo = serializers.SerializerMethodField()
+    equipo_nombre = serializers.CharField(source="muestra.referencia_equipo.nombre", read_only=True)
+    fecha_toma = serializers.DateTimeField(source="muestra.fecha_toma", read_only=True)
 
     class Meta:
         model = Reporte
@@ -99,6 +102,9 @@ class ReporteSummarySerializer(serializers.ModelSerializer):
             "enviado_por",
             "ruta_archivo",
             "with_limites",
+            "punto_muestreo",
+            "equipo_nombre",
+            "fecha_toma",
         ]
 
     def get_empresa_nombre(self, obj):
@@ -113,6 +119,14 @@ class ReporteSummarySerializer(serializers.ModelSerializer):
 
     def get_enviado_por(self, obj):
         return _user_name(obj.usuario_envio)
+
+    def get_punto_muestreo(self, obj):
+        assignments = getattr(obj.muestra, "active_point_assignments", [])
+        assignment = next(iter(assignments), None)
+        if not assignment:
+            return None
+        point = assignment.punto_muestreo
+        return {"id": point.id, "nombre": point.nombre, "codigo": point.codigo}
 
 
 class CreateReporteSerializer(serializers.ModelSerializer):

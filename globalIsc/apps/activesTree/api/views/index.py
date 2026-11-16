@@ -410,6 +410,7 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "pointName": point.nombre if point else "Sin punto de medición",
             "pointCode": point.codigo if point else "",
             "sampleId": sample.id,
+            "lotId": sample.lote_id,
             "date": sample.fecha_toma or result.fecha_medicion or result.fecha_registro,
             "sourceOrder": MaquinaViewSet._history_source_order(sample),
             "testId": str(assignment.prueba_id),
@@ -446,10 +447,10 @@ class MaquinaViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='history')
     def history(self, request, pk=None):
-        # v2 adds pointCode to each flattened row.  Keep a separate cache
-        # namespace so a previous response shape cannot make the code filter
-        # look empty until its TTL expires.
-        cached_payload, cache_token = get_related_read_response(request, "history-v2")
+        # v3 adds lotId to every flattened row.  A historical point must open
+        # its exact sample in Interpretation, which requires both IDs.  Keep a
+        # new namespace so an older cached payload cannot leave lote blank.
+        cached_payload, cache_token = get_related_read_response(request, "history-v3")
         if cached_payload is not None:
             return Response(cached_payload)
         machine = self.get_object()

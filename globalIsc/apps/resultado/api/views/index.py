@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from django.http import HttpResponse
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import viewsets, status
@@ -1328,8 +1328,45 @@ def _sample_tests_for_lote(lote, muestra_id=None, include_test_structure=True):
     return rows
 
 
-def _batch_review_payload(lote):
-    tests = _sample_tests_for_lote(lote)
+def _batch_review_test_summaries(lote):
+    """Return only the test state needed to render an interpretation batch.
+
+    The interpretation screen fetches the detailed result payload separately,
+    one sample at a time.  Hydrating the complete test definition, result JSON
+    and technical evaluation for every sample in a lot delayed the first paint
+    by several seconds.  This compact query keeps the sidebar status accurate
+    without serializing data that the screen is not yet showing.
+    """
+    result_queryset = Resultado.objects.only(
+        "id",
+        "prueba_muestra_id",
+        "estatus",
+        "fecha_actualizacion",
+        "fecha_registro",
+        "fecha_medicion",
+    )
+    rows_by_sample = defaultdict(list)
+    tests = (
+        PruebaMuestra.objects
+        .filter(muestra__lote=lote, estado_asignacion="confirmada")
+        .only("id", "muestra_id", "is_revisada", "aplicar_limites")
+        .prefetch_related(Prefetch("resultados", queryset=result_queryset))
+    )
+    for test in tests:
+        result = _active_result_for(test)
+        result_status = getattr(result, "estatus", None)
+        rows_by_sample[test.muestra_id].append({
+            "resultado": {"estatus": result_status} if result_status else None,
+            "resultado_invalidado": result_status == "rechazado",
+            "is_revisada": bool(test.is_revisada),
+            "aplicar_limites": bool(test.aplicar_limites),
+        })
+    return rows_by_sample
+
+
+def _batch_review_payload(lote, include_test_details=True):
+    tests = _sample_tests_for_lote(lote) if include_test_details else []
+    tests_by_sample = None if include_test_details else _batch_review_test_summaries(lote)
     # La preparación de informes necesita mostrar el último artefacto por
     # muestra. Consultarlo en bloque evita el N+1 y deja claro si la siguiente
     # generación creará una versión nueva.
@@ -1343,8 +1380,14 @@ def _batch_review_payload(lote):
     ):
         report_by_sample.setdefault(report.muestra_id, report)
     samples = []
-    for muestra in lote.muestras.select_related("referencia_equipo").all().order_by("id"):
-        sample_tests = [item for item in tests if item["muestra"] == muestra.id]
+    for muestra in lote.muestras.select_related("referencia_equipo").prefetch_related(
+        "asignaciones_punto_muestreo__punto_muestreo",
+    ).all().order_by("id"):
+        sample_tests = (
+            [item for item in tests if item["muestra"] == muestra.id]
+            if include_test_details
+            else tests_by_sample.get(muestra.id, [])
+        )
         interpretation = _get_interpretation_data(muestra)
         # Reconcile legacy/stale invalidation metadata. The active result is
         # the source of truth: once no test is rejected, interpretation must
@@ -1370,6 +1413,10 @@ def _batch_review_payload(lote):
             or interpretation.get("comentarios_manuales")
         )
         current_report = report_by_sample.get(muestra.id)
+        point_assignment = next(
+            (item for item in muestra.asignaciones_punto_muestreo.all() if item.activa),
+            None,
+        )
         samples.append({
             "id": muestra.id,
             "fecha_toma": muestra.fecha_toma,
@@ -1378,6 +1425,11 @@ def _batch_review_payload(lote):
             "referencia_marca": muestra.referencia_marca,
             "equipo": _sample_equipment_label(muestra),
             "ubicacion": getattr(getattr(muestra, "referencia_equipo", None), "location", None) or getattr(getattr(muestra, "referencia_equipo", None), "ubicacion", None) or muestra.equipo_placa or "-",
+            "punto_muestreo": {
+                "id": point_assignment.punto_muestreo_id,
+                "nombre": point_assignment.punto_muestreo.nombre,
+                "codigo": point_assignment.punto_muestreo.codigo,
+            } if point_assignment else None,
             "is_revisado": muestra.is_revisado,
             "is_resultado_ingresado": muestra.is_resultado_ingresado,
             "estado_revision": _sample_review_status(muestra, sample_tests),
@@ -1408,7 +1460,10 @@ def _batch_review_payload(lote):
         "total_muestras": lote.total_muestras,
         "muestras_revisadas": lote.muestras_revisadas,
         "muestras": samples,
-        "sample_tests": tests,
+        # The selected sample endpoint owns the detailed test payload.  The
+        # interpretation landing request deliberately remains a lightweight
+        # lot index so it can paint the navigation immediately.
+        "sample_tests": tests if include_test_details else [],
     }
 
 
@@ -3252,7 +3307,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             self._scope_lotes(LoteMuestras.objects.select_related("cliente_empresa", "tipo_gestion").prefetch_related("muestras")),
             pk=lote_id,
         )
-        return Response(_batch_review_payload(lote))
+        return Response(_batch_review_payload(lote, include_test_details=False))
 
     @action(detail=False, methods=["get"])
     def interpretation_sample(self, request, muestra_id=None):
@@ -3351,6 +3406,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 "punto_muestreo": {
                     "id": point_assignment.punto_muestreo_id,
                     "nombre": point_assignment.punto_muestreo.nombre,
+                    "codigo": point_assignment.punto_muestreo.codigo,
                 } if point_assignment else None,
             },
             "sample_tests": tests,
@@ -3559,6 +3615,7 @@ class ResultadoViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "punto_muestreo": {
                 "id": point_assignment.punto_muestreo_id,
                 "nombre": point_assignment.punto_muestreo.nombre,
+                "codigo": point_assignment.punto_muestreo.codigo,
             } if point_assignment else None,
             "alcance": "punto de medición" if point_assignment else "máquina",
             "groups": groups,
