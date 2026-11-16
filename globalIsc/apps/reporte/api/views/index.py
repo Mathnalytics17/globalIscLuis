@@ -878,6 +878,16 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             tests = [item for item in _sample_tests_for_lote(lote) if item["muestra"] == muestra.id] if lote else []
         equipo = getattr(muestra, "referencia_equipo", None)
         empresa = getattr(lote, "cliente_empresa", None) if lote else None
+        point_assignment = (
+            AsignacionPuntoMuestreo.objects.filter(muestra=muestra, activa=True)
+            .select_related("punto_muestreo")
+            .first()
+        )
+        punto_muestreo = getattr(point_assignment, "punto_muestreo", None)
+        # Historical OA exports call the measurement-point code "PLACA".
+        # A registered point clears the sample's manual plate by design, so
+        # take the displayed plate from that assigned point first.
+        point_code = getattr(punto_muestreo, "codigo", None) or (muestra.campos_adicionales or {}).get("codigo_punto_origen")
 
         comments = {
             "predefinidos": _configured_predefined_comments(interpretation),
@@ -916,7 +926,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 "condicion": muestra.condicion,
                 "referencia_marca": muestra.referencia_marca,
                 "contacto_cliente": muestra.contacto_cliente,
-                "equipo_placa": muestra.equipo_placa,
+                "equipo_placa": point_code or muestra.equipo_placa,
                 "periodo_servicio_aceite": muestra.periodo_servicio_aceite,
                 "unidad_periodo_aceite": muestra.unidad_periodo_aceite,
                 "periodo_servicio_equipo": muestra.periodo_servicio_equipo,
@@ -926,6 +936,11 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 "id": getattr(equipo, "id", None),
                 "nombre": getattr(equipo, "nombre", None) or getattr(equipo, "name", None) or muestra.equipo_placa,
                 "codigo": getattr(equipo, "codigo_equipo", None) or getattr(equipo, "codigo", None),
+            },
+            "punto_muestreo": {
+                "id": getattr(punto_muestreo, "id", None),
+                "nombre": getattr(punto_muestreo, "nombre", None),
+                "codigo": point_code,
             },
             "resultados": tests,
             "comentarios": comments,
