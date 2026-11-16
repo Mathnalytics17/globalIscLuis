@@ -245,6 +245,7 @@ class LoteMuestrasViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
                 | Q(cliente_ocasional_nombre__icontains=search)
                 | Q(contacto_nombre__icontains=search)
                 | Q(cliente_empresa__nombre__icontains=search)
+                | Q(muestras__id__icontains=search)
                 | Q(muestras__referencia_equipo__nombre__icontains=search)
                 | Q(muestras__referencia_equipo__codigo_equipo__icontains=search)
                 | Q(muestras__equipo_placa__icontains=search)
