@@ -354,10 +354,11 @@ class ReportEmailTests(TestCase):
         force_authenticate(request, user=self.user)
         view = ReporteViewSet.as_view({"get": "dashboard"})
 
-        # Una lectura del listado, una del resumen y tres consultas DISTINCT
-        # pequeñas para Cliente/Equipo/Punto. No se carga el JSON pesado de
-        # cada reporte ni se consulta el módulo de activos por separado.
-        with self.assertNumQueries(5):
+        # Una lectura del listado, una precarga de los puntos activos, una
+        # del resumen y tres consultas DISTINCT para Cliente/Equipo/Punto.
+        # No se carga el JSON pesado de cada reporte ni se hace una consulta
+        # por cada muestra para resolver su punto de medida.
+        with self.assertNumQueries(6):
             response = view(request)
 
         self.assertEqual(response.status_code, 200)

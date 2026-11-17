@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from apps.activesTree.api.models.index import AsignacionPuntoMuestreo
 from apps.reporte.api.models.index import Reporte, ReporteEnvio
 
 
@@ -121,7 +122,17 @@ class ReporteSummarySerializer(serializers.ModelSerializer):
         return _user_name(obj.usuario_envio)
 
     def get_punto_muestreo(self, obj):
-        assignments = getattr(obj.muestra, "active_point_assignments", [])
+        # The library queryset prefetches this attribute.  Keep a direct
+        # fallback because reports can also be serialized from other actions
+        # (or a cache populated before the prefetch was added).  A valid
+        # sample must never be displayed as "Sin punto de medida" merely
+        # because that optimization was not present on the instance.
+        assignments = getattr(obj.muestra, "active_point_assignments", None)
+        if assignments is None:
+            assignments = AsignacionPuntoMuestreo.objects.filter(
+                muestra=obj.muestra,
+                activa=True,
+            ).select_related("punto_muestreo")
         assignment = next(iter(assignments), None)
         if not assignment:
             return None
