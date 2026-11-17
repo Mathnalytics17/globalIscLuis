@@ -18,6 +18,8 @@ from apps.reporte.api.models.index import Reporte
 from apps.reporte.api.views.index import (
     ReporteViewSet,
     _clean_limit_label,
+    _historical_comment_for,
+    _historical_comment_lookup,
     _report_limit_bands,
     _report_status,
     _trend_chart_data_uri,
@@ -79,6 +81,20 @@ class ReportSemaphoreTests(SimpleTestCase):
         self.assertEqual(
             _clean_limit_label("{'min_aceptable': 10, 'max_aceptable': 20}"),
             "Límite configurado",
+        )
+
+    def test_historical_comment_matches_legacy_viscosity_label(self):
+        class HistoricalSample:
+            campos_adicionales = {
+                "comentarios_origen": {
+                    "COM_Viscosidad Cinemática 100° C": "NO DESEADO",
+                }
+            }
+
+        lookup = _historical_comment_lookup(HistoricalSample())
+        self.assertEqual(
+            _historical_comment_for(lookup, "Viscosidad cinemática a 100 °C"),
+            "NO DESEADO",
         )
 
     def test_trend_chart_is_embedded_as_a_pdf_safe_image(self):

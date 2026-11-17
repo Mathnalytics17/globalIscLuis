@@ -30,6 +30,10 @@ def source_editorial_comments(row):
     return [text for _, text in sorted(numbered)]
 
 
+def source_responsible(row):
+    return " ".join(str(row.get("Responsable") or "").split())
+
+
 def main():
     p=argparse.ArgumentParser(description="Avanza históricos a reportes internos no aprobados por API.")
     p.add_argument("--artifacts",type=Path,default=Path("outputs/migracion_historica_global_oil"));p.add_argument("--base-url",default="http://localhost:8000")
@@ -65,7 +69,16 @@ def main():
                 "graficas_activas": False, "graficas_seleccionadas": [],
                 "motivo": "Interpretación histórica importada; requiere validación técnica antes de aprobación.",
             })
-        result=api.post("lubrication/reports/generate-batch-from-interpretation/", {"lote":batch,"responsable":"Global Oil - migración histórica"})
+        responsables_por_muestra = {
+            item["muestra"]: source_responsible(source[item["oa"]])
+            for item in samples
+            if source_responsible(source[item["oa"]])
+        }
+        result=api.post("lubrication/reports/generate-batch-from-interpretation/", {
+            "lote": batch,
+            "responsable": "Global Oil - migración histórica",
+            "responsables_por_muestra": responsables_por_muestra,
+        })
         audit.append({"lote":batch,"muestras":len(samples),"reportes":result.get("generated",0),"visible_cliente":False,"aprobados":False})
         report.write_text(json.dumps(audit,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     report.write_text(json.dumps(audit,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
