@@ -2015,7 +2015,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             except Exception:
                 firma_src = firma_url
 
-        logo_global = "/media/templates/logo-dataia.png"
+        logo_global = f"/media/templates/{settings.REPORT_LOGO_FILENAME}"
         logo_report = "/media/templates/icon-report.png"
 
         return {
@@ -2047,6 +2047,7 @@ class ReporteViewSet(ActionPermissionMixin, viewsets.ModelViewSet):
             "fecha_emision": reporte.fecha_emision.strftime("%d/%m/%Y") if reporte.fecha_emision else "N/A",
             "muestra": muestra,
             "fecha_toma": _format_report_date(muestra.get("fecha_toma")),
+            "logo_global": logo_global,
             "trend_charts": trend_charts,
         }
 

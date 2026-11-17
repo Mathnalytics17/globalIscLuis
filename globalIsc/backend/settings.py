@@ -34,6 +34,17 @@ ENVIRONMENT = os.getenv("DJANGO_ENV", "development").strip().lower()
 IS_PRODUCTION = ENVIRONMENT == "production"
 DEBUG = env_bool("DJANGO_DEBUG", not IS_PRODUCTION)
 
+# The development/demo environment is branded as Global Oil.  The deployed
+# production tenant retains the Dataia identity unless REPORT_BRAND overrides
+# it explicitly (accepted values: "globaloil" and "dataia").
+REPORT_BRAND = os.getenv(
+    "REPORT_BRAND",
+    "dataia" if IS_PRODUCTION else "globaloil",
+).strip().lower()
+if REPORT_BRAND not in {"globaloil", "dataia"}:
+    REPORT_BRAND = "dataia" if IS_PRODUCTION else "globaloil"
+REPORT_LOGO_FILENAME = f"logo-{REPORT_BRAND}.png"
+
 
 def required_env(name):
     value = os.getenv(name)
