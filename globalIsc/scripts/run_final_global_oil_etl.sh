@@ -97,5 +97,5 @@ run scripts/run_physical_api_shards.py --password-env DATAIA_IMPORT_PASSWORD
 unset DATAIA_IMPORT_PASSWORD
 
 run scripts/advance_historical_reports_via_api.py "${COMMON[@]}" "${AUTH[@]}" --resume
-python manage.py restore_historical_responsibles --artifacts "$ARTIFACTS"
+HISTORICAL_ACCOUNT_PASSWORD="$PASSWORD" python manage.py restore_historical_responsibles --artifacts "$ARTIFACTS"
 python manage.py verify_global_oil_import --artifacts "$ARTIFACTS"

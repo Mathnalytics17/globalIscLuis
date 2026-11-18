@@ -6,6 +6,7 @@ disabled accounts are created only as a traceability directory; they cannot
 log in or receive any permissions.
 """
 import json
+import os
 import re
 import unicodedata
 from pathlib import Path
@@ -38,6 +39,11 @@ class Command(BaseCommand):
             help="Carpeta de salida del ETL histórico.",
         )
         parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument(
+            "--password-env",
+            default="HISTORICAL_ACCOUNT_PASSWORD",
+            help="Variable de entorno con la contraseña común de las cuentas históricas.",
+        )
 
     def handle(self, *args, **options):
         raw_path = options["artifacts"] / "staging" / "reportes_oa_raw.jsonl"
@@ -54,6 +60,13 @@ class Command(BaseCommand):
             if responsible and oa:
                 responsible_by_oa[oa] = responsible
 
+        names_from_source = set(responsible_by_oa.values())
+        account_password = os.environ.get(options["password_env"], "")
+        if names_from_source and not options["dry_run"] and not account_password:
+            raise CommandError(
+                f"Defina la variable {options['password_env']} para crear las cuentas históricas con una contraseña común."
+            )
+
         report_updates = 0
         names = set()
         for report in Reporte.objects.select_related("muestra").all().iterator():
@@ -69,11 +82,24 @@ class Command(BaseCommand):
 
         created = 0
         existing = 0
+        passwords_updated = 0
         for name in sorted(names):
             email = _email_for(name)
             user = User.objects.filter(email=email).first()
             if user:
                 existing += 1
+                # These addresses are reserved for ETL provenance.  Keep the
+                # shared bootstrap password reproducible while the account is
+                # disabled; never overwrite an account that was later enabled.
+                if (
+                    not options["dry_run"]
+                    and not user.is_active
+                    and user.access_status == User.AccessStatus.DISABLED
+                    and user.block_reason.startswith("Cuenta histórica de trazabilidad")
+                ):
+                    user.set_password(account_password)
+                    user.save(update_fields=["password"])
+                    passwords_updated += 1
                 continue
             created += 1
             if not options["dry_run"]:
@@ -89,7 +115,7 @@ class Command(BaseCommand):
                     is_read_only=True,
                     block_reason="Cuenta histórica de trazabilidad. Sin acceso hasta validación administrativa.",
                 )
-                user.set_unusable_password()
+                user.set_password(account_password)
                 user.save()
 
         self.stdout.write(json.dumps({
@@ -98,4 +124,5 @@ class Command(BaseCommand):
             "responsables_historicos": len(names),
             "cuentas_creadas_inactivas": created,
             "cuentas_historicas_existentes": existing,
+            "contrasenas_historicas_actualizadas": passwords_updated,
         }, ensure_ascii=False))

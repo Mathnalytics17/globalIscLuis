@@ -144,7 +144,7 @@ try {
     # traceability-only accounts; it is intentionally skipped on dry runs.
     Push-Location $backendRoot
     try {
-        docker compose -p globaloil-local --env-file .env.local -f docker-compose.prod.yml -f docker-compose.local.yml exec -T web python manage.py restore_historical_responsibles --artifacts "/usr/src/globalIsc/$linuxArtifacts"
+        docker compose -p globaloil-local --env-file .env.local -f docker-compose.prod.yml -f docker-compose.local.yml exec -T -e "HISTORICAL_ACCOUNT_PASSWORD=$Password" web python manage.py restore_historical_responsibles --artifacts "/usr/src/globalIsc/$linuxArtifacts"
         if ($LASTEXITCODE -ne 0) { throw "Falló la restauración de responsables históricos." }
     } finally { Pop-Location }
     if (-not $SkipFinalVerification) {
