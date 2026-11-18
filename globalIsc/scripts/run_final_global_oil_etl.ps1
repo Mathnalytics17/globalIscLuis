@@ -139,6 +139,14 @@ try {
         }
     }
     Invoke-EtlPython scripts\advance_historical_reports_via_api.py @common @auth --resume
+    # The OA source is authoritative for its historical analyst.  This runs
+    # inside the same Docker database as the API and creates disabled,
+    # traceability-only accounts; it is intentionally skipped on dry runs.
+    Push-Location $backendRoot
+    try {
+        docker compose -p globaloil-local --env-file .env.local -f docker-compose.prod.yml -f docker-compose.local.yml exec -T web python manage.py restore_historical_responsibles --artifacts "/usr/src/globalIsc/$linuxArtifacts"
+        if ($LASTEXITCODE -ne 0) { throw "Falló la restauración de responsables históricos." }
+    } finally { Pop-Location }
     if (-not $SkipFinalVerification) {
         Push-Location $backendRoot
         try {
